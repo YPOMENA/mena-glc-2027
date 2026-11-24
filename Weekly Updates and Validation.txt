@@ -1,0 +1,163 @@
+YPO MENA GLC 2027 REGISTRATION DASHBOARD
+Quick start and data validation
+
+OPEN THE DASHBOARD
+Save YPO-MENA-GLC-2027-Dashboard.html on your computer and double-click it.
+Use a current Microsoft Edge or Google Chrome browser. No installation,
+server or internet connection is required. Keep the file in a stable location.
+
+The initial report uses Bangkok data as of 23 November 2026. Training is
+scheduled for Bangkok on 15–16 March 2027 and San Diego on 3–4 May 2027.
+No San Diego registration data was supplied.
+
+EXPLORE THE REPORT
+- Core role registrations: all 27 chapters, role statuses and coverage.
+  Click a role cell to see every matching officer and registration detail.
+- Role breakdown: expand each category for officers and follow-up chapters.
+- Non-core officers: SPO, SFO and Family Officer. No registrations for these
+  roles were identified in the initial file. Their applicability is not
+  established by the reference app, so absent roles await verification.
+- Registration details: all imported source records, including regional
+  officers and workshop delivery staff. Click an officer for full details.
+  Click a column heading to sort it, including registration dates.
+
+Use the chapter, officer name, role, location and status filters. Statistics
+recalculate within these filters. Officer-name search restricts coverage to
+matching officers. A status filter also restricts the coverage denominator
+to matching applicable role slots; Registered-only therefore shows 100%.
+Use Reset to return to an unfiltered view, then choose Bangkok if desired.
+The chapter matrix retains chapter type (YPO or YPO Gold) below each name.
+
+When All locations is selected before San Diego has been imported, roles
+with no identified registration are Pending Verification because combined
+location coverage is incomplete. Selecting Bangkok shows Unregistered for
+roles without a Bangkok registration. An unregistered role has no officer
+record, so it does not create an invented entry in Registration Details.
+
+UPDATE EACH WEEK
+1. Select Import weekly report.
+2. Select Bangkok or San Diego. Import each location separately.
+3. Set Data as of to the reporting date of the file. The file's latest
+   registration timestamp is not assumed to be the reporting date.
+4. Choose Complete snapshot for a full registration report. Choose
+   Incremental update only when the file contains additions or changes.
+5. Upload CSV or a modern Excel Workbook (.xlsx). For Excel, choose the
+   worksheet containing the registration table. Older .xls files must first
+   be saved as .xlsx. Put the column headings in the first row.
+6. Review the preview, including new, changed, absent and flagged records.
+7. Select Save weekly snapshot. All views refresh automatically.
+8. Open Data quality & weekly changes for the changes summary and coverage.
+   Open Weekly history & backups to compare the underlying records.
+9. Export a full history backup after every update. For a shareable updated
+   dashboard, choose Save dashboard with current history.
+
+The current report uses the latest dated snapshot for each location.
+Older reports remain available in the Report / historical snapshot selector.
+Same-date imports retain both snapshots, with the most recently saved one
+used as current. If Location is missing from a source file, your location
+selection supplies it. Mixed-location or conflicting-location files are
+rejected so they cannot accidentally replace the wrong location's report.
+
+Complete snapshots replace that location's current records. Missing records
+are labelled absent from the latest report, not cancelled. Incremental
+updates retain prior records absent from the new file and replace all prior
+rows for each incoming name/chapter/registration-type/location identity.
+For a person with multiple sessions under that same identity, include all
+their current rows in an incremental file. Use complete snapshots whenever
+possible. A changed name, chapter, type or location appears as an absent
+identity plus a new identity, rather than an assumed correction.
+
+EXPECTED SOURCE COLUMNS
+Recommended: the same column headings as the supplied Bangkok export:
+Location; Registration Type; First Name; Last Name; Primary Chapter;
+Sessions (Optional); Last Registration Date (GMT-05:00) Eastern [US & Canada].
+The importer also accepts Chapter, Officer Role, Full Name or Officer Name,
+Workshop or Session, and Registration Date as simple alternative headings.
+CSV files should use UTF-8 to preserve special characters. Files up to
+20 MB are accepted; each decompressed Excel component is limited to 30 MB.
+
+HISTORY AND SHARING
+History is stored in this browser on this device. It is not a shared online
+database and does not automatically sync between computers or colleagues.
+Clearing browser data, private browsing, moving/renaming the HTML file, or
+switching browsers may make saved history unavailable.
+
+Weekly history & backups provides:
+- Export full history backup: a JSON file containing all saved snapshots.
+- Restore history backup: merge a backup into this browser's saved history.
+- Save dashboard with current history: an HTML copy with the saved snapshots
+  included, suitable for opening on another computer or sharing securely.
+
+Export CSV downloads registration details for the current filters. It keeps
+special characters and excludes personal email addresses. The dashboard,
+backups and exports contain officer names; share them through your usual
+approved YPO channels. Email, phone and address columns are stripped during
+import and are not bundled in the initial dashboard.
+
+INITIAL VALIDATION — SOURCE AS OF 23 NOVEMBER 2026
+55 source rows; 55 retained registration records; 0 exact duplicate rows.
+27 reference chapters: 24 YPO and 3 YPO Gold.
+136 applicable core chapter-role combinations, including the user-confirmed
+MEO role at YPO UAE Integrated.
+46 confirmed applicable chapter-role officer records, covering 44 distinct
+chapter-role combinations across 20 chapters: 32.4% coverage.
+
+Role     Applicable chapters   Registered chapters   Officer records
+CC              27                    10                  10
+LO              27                     6                   6
+ALO             27                     9                  10
+FO              27                     5                   5
+MO              24                    13                  14
+MEO              4                     1                   1
+TOTAL          136                    44                  46
+
+Multiple officers preserved:
+- YPO UAE Integrated ALO: Hisham Albahar and Stéphane Boukris.
+- YPO Dubai Downtown Integrated MO: Milos Stojanovic and Kami Viswanathan.
+Each pair contributes one chapter-role coverage count.
+
+The other 9 source records are:
+- 6 regional officers: retained as regional registrations, excluded from
+  chapter-role coverage because a regional appointment and a primary
+  chapter do not establish a chapter appointment.
+- 3 workshop delivery team records: retained, excluded from chapter coverage.
+The two previously flagged chapter records have been confirmed by the user.
+
+VERIFICATION ITEMS AND ASSUMPTIONS
+1. Isabela Ududec, YPO UAE Integrated: the user confirmed her registration
+   as MEO. She is Registered, and MEO is applicable for YPO UAE Integrated
+   in addition to the three YPO Gold chapters. This is a specific chapter
+   exception; it does not extend MEO to all YPO chapters.
+2. Nuha Abujaber, YPO Jordan Integrated: the user confirmed her chapter
+   Membership Officer appointment. She is Registered MO. Her original
+   source Registration Type (Dual Role Officer) is preserved in the detail
+   record for traceability; the dashboard displays the confirmed MO role.
+3. Applicability follows the reference App.jsx with the confirmed UAE MEO
+   exception: CC, LO, ALO and FO apply to every chapter; MO to YPO chapters;
+   MEO to the three YPO Gold chapters plus YPO UAE Integrated. These
+   confirmations are applied to saved history and future matching imports.
+   They do not create registrations if the officer is absent from a new
+   complete snapshot, or override a future cancelled or conflicting source
+   status. The original source file has not been altered.
+4. Repeated workshop labels occur within source rows. The original text is
+   retained; display labels are deduplicated. Repetition does not create
+   additional people or coverage. Exact duplicate source rows are suppressed
+   on future imports, while legitimate distinct registrations are preserved.
+5. Chapter names matched the reference roster. No officer names or source
+   registration dates were missing. Name capitalization and special
+   characters are retained exactly as supplied.
+6. Source timestamps range from 1 November to 23 November 2026. The source
+   field is Last Registration Date, in Eastern GMT-05:00, which may be an
+   update timestamp rather than the original booking date. Dates are kept
+   in the supplied time zone and not converted to Dubai time.
+7. Registered confirms a registration record only. It does not establish
+   attendance. San Diego data is not loaded, so this is Bangkok-only
+   registration coverage, not final coverage for the entire training cycle.
+
+CHECKS COMPLETED
+Source counts were reconciled independently against the original CSV.
+Browser checks covered all four views, filtering, multiple-officer details,
+CSV export, complete weekly import and comparison, duplicate suppression,
+saved snapshot persistence, Excel import, separate training-location data,
+portable dashboard export and the mobile layout. No browser errors were
+observed during the final integration checks.
