@@ -870,8 +870,10 @@ function process(rows,chapters,location){let seen=new Set(),duplicates=0;const o
 function diff(prev,next){const buckets=arr=>{let m=new Map();for(const r of arr){if(!m.has(r.id))m.set(r.id,[]);m.get(r.id).push(r);}return m;};const a=buckets(prev),b=buckets(next),added=[],missing=[],changed=[];for(const k of new Set([...a.keys(),...b.keys()])){let aa=[...(a.get(k)||[])],bb=[...(b.get(k)||[])];for(let i=aa.length-1;i>=0;i--){const j=bb.findIndex(r=>JSON.stringify(r.raw)===JSON.stringify(aa[i].raw));if(j>=0){aa.splice(i,1);bb.splice(j,1);}}while(aa.length&&bb.length)changed.push({before:aa.shift(),after:bb.shift()});missing.push(...aa);added.push(...bb);}return {added,missing,changed};}
 function csv(text){text=text.replace(/^\uFEFF/,'');const sep=(text.split(/\r?\n/)[0].match(/;/g)||[]).length>(text.split(/\r?\n/)[0].match(/,/g)||[]).length?';':',';let rows=[],row=[],field='',quoted=false;for(let i=0;i<text.length;i++){let c=text[i];if(c==='"'){if(quoted&&text[i+1]==='"'){field+='"';i++;}else quoted=!quoted;}else if(c===sep&&!quoted){row.push(field);field='';}else if((c==='\n'||c==='\r')&&!quoted){if(c==='\r'&&text[i+1]==='\n')i++;row.push(field);if(row.some(x=>x.trim()))rows.push(row);row=[];field='';}else field+=c;}if(quoted)throw Error('CSV contains an unfinished quoted field.');row.push(field);if(row.some(x=>x.trim()))rows.push(row);if(rows.length<2)throw Error('No registration rows found.');let headers=rows.shift().map(h=>h.trim());if(new Set(headers).size!==headers.length)throw Error('Duplicate column headings found.');return rows.map((r,i)=>{if(r.length!==headers.length)throw Error('Column count differs at CSV row '+(i+2));return Object.fromEntries(headers.map((h,j)=>[h,r[j]]));});}
 function cell(ch,r,records,loaded=true){const related=records.filter(x=>x.chapter===ch.name&&x.role===r&&x.scope==='Chapter');const good=related.filter(x=>x.status==='Registered');return {records:related,status:!applicable(ch,r)?'Not Applicable':good.length?'Registered':related.length||!loaded?'Pending Verification':'Unregistered',conflict:!applicable(ch,r)&&related.length>0};}
+// Only these two labels are presented to users; other internal states stay blank.
+const visibleStatus=status=>status==='Registered'||status==='Unregistered'?status:'';
 function refreshSnapshot(snapshot,chapters){return {...snapshot,records:snapshot.records.map(record=>record.raw?{...process([record.raw],chapters,snapshot.location).records[0],sourceRow:record.sourceRow}:record)};}
-return {roles,core,non,norm,applicable,process,diff,csv,cell,cleanRow,refreshSnapshot};
+return {roles,core,non,norm,applicable,process,diff,csv,cell,cleanRow,refreshSnapshot,visibleStatus};
 })();
 
 
@@ -944,9 +946,9 @@ const PdfReport = (() => {
     text(ctx, `${records.length} source registration records`, M + 239, 140, '#64748b', '9px Arial');
     text(ctx, `Location: ${location}`, M + 523, 125, NAVY, 'bold 12px Arial');
     text(ctx, 'All names included; screen searches ignored', M + 523, 140, '#64748b', '8px Arial');
-    const colors = { Registered: ['#e6f3e9', '#216c3b'], Unregistered: ['#fbecef', '#a6374b'], 'Pending Verification': ['#fff1d4', '#885d05'], 'Not Applicable': ['#edf0f5', '#738096'] };
+    const colors = { Registered: ['#e6f3e9', '#216c3b'], Unregistered: ['#fbecef', '#a6374b'], 'Pending Verification': ['#ffffff', '#52677d'], 'Not Applicable': ['#ffffff', '#738096'] };
     let legendX = M;
-    for (const [label, status, width] of [['Names = Registered', 'Registered', 175], ['— Unregistered', 'Unregistered', 145], ['? Pending verification', 'Pending Verification', 190], ['N/A Not applicable', 'Not Applicable', 150]]) {
+    for (const [label, status, width] of [['Names = Registered', 'Registered', 175], ['— Unregistered', 'Unregistered', 145]]) {
       ctx.fillStyle = colors[status][0]; ctx.fillRect(legendX, 162, 11, 11);
       text(ctx, label, legendX + 16, 171, colors[status][1], '9px Arial'); legendX += width;
     }
@@ -955,7 +957,7 @@ const PdfReport = (() => {
       ctx.font = 'bold 10px Arial'; const chapterLines = wrap(ctx, ch.name, widths[0] - 12);
       const cells = Core.core.map((role, i) => {
         const cell = Core.cell(ch, role, records, loaded); ctx.font = '10px Arial';
-        const lines = cell.records.flatMap(r => wrap(ctx, (r.name || 'Name not supplied') + (location === 'All' ? ` (${r.location})` : '') + (r.status === 'Pending Verification' ? ' ?' : ''), widths[i + 1] - 12));
+        const lines = cell.records.flatMap(r => wrap(ctx, (r.name || 'Name not supplied') + (location === 'All' ? ` (${r.location})` : ''), widths[i + 1] - 12));
         return { ...cell, lines };
       });
       const height = Math.max(27, chapterLines.length * 12 + 9, ...cells.map(cell => cell.lines.length * 12 + 9));
@@ -964,7 +966,7 @@ const PdfReport = (() => {
     });
     const nonCore = records.filter(r => Core.non.includes(r.role) && r.scope === 'Chapter').sort((a, b) => a.chapter.localeCompare(b.chapter));
     ctx.font = '10px Arial';
-    const nonCorePlans = nonCore.map(r => wrap(ctx, `${r.chapter} | ${Core.roles[r.role]} | ${r.name || 'Name not supplied'} | ${r.location} | ${r.displaySession || 'Session not supplied'} | ${r.status}`, W - M * 2 - 12));
+    const nonCorePlans = nonCore.map(r => wrap(ctx, `${r.chapter} | ${Core.roles[r.role]} | ${r.name || 'Name not supplied'} | ${r.location} | ${r.displaySession || 'Session not supplied'} | ${Core.visibleStatus(r.status)}`, W - M * 2 - 12));
     const bodyHeight = 28 + plans.reduce((sum, row) => sum + row.height, 0) + (nonCore.length ? 28 + nonCorePlans.reduce((sum, lines) => sum + lines.length * 12 + 7, 0) : 0);
     const availableHeight = H - 257;
     const fit = Math.min(1, availableHeight / bodyHeight);
@@ -984,7 +986,7 @@ const PdfReport = (() => {
       row.cells.forEach((cell, i) => {
         const [bg, color] = colors[cell.status]; ctx.fillStyle = bg; ctx.fillRect(x + 1, y + 1, widths[i + 1] - 2, row.height - 2);
         if (cell.lines.length) cell.lines.forEach((line, j) => text(ctx, line, x + 6, y + 15 + j * 12, color, '10px Arial'));
-        else text(ctx, cell.status === 'Not Applicable' ? 'N/A' : cell.status === 'Pending Verification' ? '?' : '—', x + 6, y + 17, color, '10px Arial');
+        else if (cell.status === 'Unregistered') text(ctx, '—', x + 6, y + 17, color, '10px Arial');
         x += widths[i + 1];
       });
       text(ctx, row.coverage, x + 7, y + 17, NAVY, 'bold 10px Arial');
@@ -1022,8 +1024,8 @@ const STORAGE_KEY = "ypo-mena-glc-2027-react-v1";
 const INITIAL_RESULT = Core.process(SEED.rows, SEED.chapters, "Bangkok");
 const INITIAL_SNAPSHOT = { id: "bangkok-2026-11-23", date: "2026-11-23", location: "Bangkok", filename: "BKK_23 NOV(Registrant Details).csv", mode: "complete", ...INITIAL_RESULT };
 const TOTAL_APPLICABLE = SEED.chapters.reduce((sum, ch) => sum + Core.core.filter(role => Core.applicable(ch, role)).length, 0);
-const STATUS_CLASS = { Registered: "registered", Unregistered: "unregistered", "Pending Verification": "pending", "Not Applicable": "na" };
-const STATUS_ICON = { Registered: "✓", Unregistered: "○", "Pending Verification": "?", "Not Applicable": "—" };
+const STATUS_CLASS = { Registered: "registered", Unregistered: "unregistered" };
+const STATUS_ICON = { Registered: "✓", Unregistered: "○" };
 const DATES = { Bangkok: "15–16 March 2027", "San Diego": "3–4 May 2027" };
 const percentage = (n, d) => d ? `${(n / d * 100).toFixed(1)}%` : "—";
 const normalize = Core.norm;
@@ -1045,7 +1047,7 @@ function previousSnapshot(snapshot, snapshots) {
   return snapshots.filter(s => s.location === snapshot.location && s.id !== snapshot.id && (s.date < snapshot.date || s.date === snapshot.date && snapshots.indexOf(s) < snapshots.indexOf(snapshot)))
     .sort((a, b) => b.date.localeCompare(a.date) || snapshots.indexOf(b) - snapshots.indexOf(a))[0];
 }
-function StatusBadge({ status }) { return <span className={`chip ${STATUS_CLASS[status]}`}>{STATUS_ICON[status]} {status}</span>; }
+function StatusBadge({ status }) { if (!Core.visibleStatus(status)) return null; return <span className={`chip ${STATUS_CLASS[status]}`}>{STATUS_ICON[status]} {status}</span>; }
 function OfficerRecord({ record: r }) {
   const fields = {
     "Chapter": r.chapter, "Source officer role": r.type,
@@ -1104,7 +1106,7 @@ export default function App() {
   const exportDetails = () => {
     const columns = ["Officer name", "Chapter", "Officer role", "Mapped role", "Scope", "Training location", "Training dates", "Workshop/session", "Registration date (Eastern GMT-05:00)", "Registration status", "Verification notes"];
     const safe = value => { let text = String(value ?? ""); if (/^[=+@\-\t\r]/.test(text)) text = "'" + text; return '"' + text.replace(/"/g, '""') + '"'; };
-    const rows = model.details.map(r => [r.name, r.chapter, r.confirmation && r.role ? Core.roles[r.role] : r.type, r.role, r.scope, r.location, DATES[r.location] || "Not supplied", r.displaySession, r.date, r.status, r.issues.join("; ")]);
+    const rows = model.details.map(r => [r.name, r.chapter, r.confirmation && r.role ? Core.roles[r.role] : r.type, r.role, r.scope, r.location, DATES[r.location] || "Not supplied", r.displaySession, r.date, Core.visibleStatus(r.status), r.issues.join("; ")]);
     downloadFile("YPO-MENA-GLC-2027-registrations.csv", "\uFEFF" + [columns, ...rows].map(row => row.map(safe).join(",")).join("\r\n"), "text/csv;charset=utf-8");
     setMessage("Exported the registration records in the current filtered view.");
   };
@@ -1170,7 +1172,7 @@ export default function App() {
         const coverage = model.coverage(ch);
         return <tr key={ch.name}><td className="chapter">{ch.name}<small className={ch.type === "YPO Gold" ? "gold" : ""}>{ch.type}</small></td>{keys.map(role => {
           const cell = model.getCell(ch, role); const visible = filters.status === "All" || cell.status === filters.status;
-          return <td key={role} className="center">{visible ? <button className="cellbtn" title={cell.records.map(r => `${r.name} · ${r.displaySession}`).join("\n") || cell.status} onClick={() => openRecords(cell.records, `${ch.name} · ${Core.roles[role]}`)}><StatusBadge status={cell.status} />{cell.conflict && <span className="officer" style={{ color: "#996309" }}>⚠ Registration requires review</span>}{cell.records.map((record, i) => <span className="officer" key={`${record.id}-${i}`}>{record.name || "Name not supplied"}</span>)}</button> : <span className="muted">Filtered out</span>}</td>;
+          return <td key={role} className="center">{visible ? <button className="cellbtn" title={cell.records.map(r => `${r.name} · ${r.displaySession}`).join("\n") || Core.visibleStatus(cell.status)} onClick={() => openRecords(cell.records, `${ch.name} · ${Core.roles[role]}`)}><StatusBadge status={cell.status} />{cell.conflict && <span className="officer" style={{ color: "#996309" }}>⚠ Registration requires review</span>}{cell.records.map((record, i) => <span className="officer" key={`${record.id}-${i}`}>{record.name || "Name not supplied"}</span>)}</button> : <span className="muted">Filtered out</span>}</td>;
         })}{!nonCore && <td className="coverage"><b>{coverage.registered}/{coverage.applicable}</b><div className="bar"><i style={{ width: `${coverage.applicable ? coverage.registered / coverage.applicable * 100 : 0}%` }} /></div></td>}</tr>;
       })}</tbody></table>{(!keys.length || !model.chapters.length) && <div className="empty">No matching chapters or roles. Adjust or reset filters.</div>}</div><div className="legend">{Object.keys(STATUS_CLASS).map(status => <StatusBadge key={status} status={status} />)}</div></>;
   }
@@ -1183,7 +1185,6 @@ export default function App() {
         <details><summary>{slots.length} applicable chapters</summary>{slots.map(cell => <div className="person" key={cell.ch.name}>{cell.ch.name}</div>)}</details>
         <details><summary>{registered.length} registered chapters · {officers.length} officer records</summary>{officers.map((r, i) => <div className="person" key={`${r.id}-${i}`}><button className="link" onClick={() => openRecords([r], "Individual registration")}>{r.name}</button><br />{r.chapter}<br />{r.location} · {r.displaySession}</div>)}{!officers.length && <p>No matching registrations.</p>}</details>
         <details><summary>{followup.length} chapters without confirmed registration</summary>{followup.map(cell => <div className="person" key={cell.ch.name}>{cell.ch.name}<br /><StatusBadge status={cell.status} /></div>)}{!followup.length && <p>No follow-up chapters in this view.</p>}</details>
-        <details><summary>{pendingSlots.length} chapter-role slots pending verification</summary>{pendingSlots.map(cell => <div className="person" key={cell.ch.name}>{cell.ch.name}<br />{cell.records.map(r => `${r.name}: ${r.issues.join("; ")}`).join(" · ") || "Location report not loaded."}</div>)}</details>
       </section>;
     })}</div>{filters.role !== "All" && Core.non.includes(filters.role) && <p className="empty">Select a core role, or open Non-core officers.</p>}</>;
   }
@@ -1195,7 +1196,7 @@ export default function App() {
     ["Chapters in view", model.chapters.length, "27 chapters in reference roster"],
     ["Registered role coverage", percentage(model.registered.length, model.applicable.length), `${model.registered.length} / ${model.applicable.length} applicable core role slots in filtered view`],
     ["Matching registration records", model.details.length, "Includes regional and delivery records in the detailed view"],
-    ["Role slots needing review", model.pending.length, `${flagged.length} matching records flagged for verification`]
+    ["Chapters fully registered", model.chapters.filter(ch => { const c = model.coverage(ch); return c.applicable > 0 && c.registered === c.applicable; }).length, "All selected applicable core roles registered"]
   ];
   return <div className="ypo-dashboard">
     <style>{DASHBOARD_CSS}</style>
@@ -1209,7 +1210,6 @@ export default function App() {
       <section className="panel" aria-live="polite">{tab === 0 ? renderMatrix() : tab === 1 ? renderRoles() : tab === 2 ? renderMatrix(true) : renderDetails()}</section>
       <details className="audit"><summary><b>Data quality & weekly changes</b> <span className="muted">· {flagged.length} flagged matching records</span></summary><p className="muted">Regional appointments do not establish a chapter appointment. Repeated session labels within a row are displayed once. Email and contact-address columns are excluded from saved and exported dashboard data.</p>{selected.map(s => { const prior = previousSnapshot(s, snapshots), delta = prior ? Core.diff(prior.records, s.records) : null; return <div className="notice" key={s.id}><b>{s.location} · {s.date}</b> — {s.filename}<br />{snapshotCoverage(s)}/{TOTAL_APPLICABLE} applicable core chapter roles registered ({percentage(snapshotCoverage(s), TOTAL_APPLICABLE)}).<br />{s.sourceRows} source rows → {s.records.length} retained records; {s.duplicates} exact duplicate rows suppressed.<br />{delta ? `Compared with ${prior.date}: ${delta.added.length} new, ${delta.changed.length} changed, ${delta.missing.length} absent from latest report. Coverage change: ${snapshotCoverage(s) - snapshotCoverage(prior)} role slots. Missing records are not assumed cancelled.` : "Initial baseline; no earlier snapshot for comparison."}</div>; })}
         {flagged.map((r, i) => <div className="person" key={`${r.id}-${i}`}><button className="link" onClick={() => openRecords([r], "Verification details")}>{r.name}</button> · {r.chapter}<br />{r.issues.join("; ")}</div>)}
-        <div className="notice amber"><b>What does Pending Verification mean?</b><br />The record or data is not clear enough to confirm chapter-role coverage. It can indicate an unclear role, an unmatched chapter, a conflict with applicability, or data not yet supplied for a selected location. It does not mean a registration was cancelled. Absent non-core roles also await confirmation of whether the role applies.</div>
         <p className="muted">Applicability from the reference app: CC, LO, ALO and FO apply to all 27 chapters. MO applies to 24 YPO chapters; MEO to 3 YPO Gold chapters plus YPO UAE Integrated, as confirmed by the user. Isabela Ududec is registered MEO; Nuha Abujaber is registered MO. Non-core applicability is not established by the reference.</p>
       </details>
     </main><footer>YPO MENA · GLC 2027 Registration Dashboard<br />Registration does not establish training attendance. History is saved in this browser; export a backup after each weekly update.</footer>
