@@ -923,6 +923,7 @@ const PdfReport = (() => {
   async function generate({ chapters, snapshots, location = 'All' }) {
     if (document.fonts?.ready) await document.fonts.ready;
     const records = snapshots.flatMap(s => s.records).filter(r => location === 'All' || r.location === location);
+    const showLocations = location === 'All' && new Set(records.map(r => r.location)).size > 1;
     const loaded = location === 'All' ? ['Bangkok', 'San Diego'].every(l => snapshots.some(s => s.location === l)) : snapshots.some(s => s.location === location);
     const asOf = snapshots.filter(s => location === 'All' || s.location === location).map(s => `${s.location}: ${s.date}`).join(' | ') || 'No report loaded for this location';
     const total = chapters.reduce((sum, ch) => sum + Core.core.filter(r => Core.applicable(ch, r)).length, 0);
@@ -932,32 +933,37 @@ const PdfReport = (() => {
     ctx.scale(2, 2); ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = NAVY; ctx.fillRect(M, 21, 31, 3);
     text(ctx, 'MIDDLE EAST & NORTH AFRICA', M + 42, 26, '#64748b', 'bold 9px Arial');
-    text(ctx, 'GLC 2027 Registrations', M, 57, NAVY, 'bold 25px Arial');
-    text(ctx, 'Bangkok: 15-16 March 2027 | San Diego: 3-4 May 2027', M, 76, '#52677d', '10px Arial');
+    text(ctx, 'MENA GLC Registrations 2027', M, 53, NAVY, 'bold 24px Arial');
+    text(ctx, 'Bangkok: 15-16 March 2027 | San Diego: 3-4 May 2027', M, 73, '#52677d', '10px Arial');
     ctx.textAlign = 'right';
-    text(ctx, `${total ? (registered / total * 100).toFixed(1) : '0.0'}%`, W - M, 56, NAVY, 'bold 29px Arial');
-    text(ctx, 'CORE ROLE COVERAGE', W - M, 73, '#64748b', '8px Arial');
+    text(ctx, `${total ? (registered / total * 100).toFixed(1) : '0.0'}%`, W - M, 52, NAVY, 'bold 29px Arial');
+    text(ctx, 'CORE ROLE COVERAGE', W - M, 69, '#64748b', '8px Arial');
     ctx.textAlign = 'left';
-    text(ctx, `Data as of ${asOf}`, M, 95, '#52677d', '10px Arial');
-    ctx.fillStyle = '#f0f4f9'; ctx.fillRect(M, 108, W - M * 2, 41);
-    text(ctx, `All ${chapters.length} chapters`, M + 12, 125, NAVY, 'bold 12px Arial');
-    text(ctx, 'Full chapter roster', M + 12, 140, '#64748b', '9px Arial');
-    text(ctx, `${registered}/${total} core roles registered`, M + 239, 125, NAVY, 'bold 12px Arial');
-    text(ctx, `${records.length} source registration records`, M + 239, 140, '#64748b', '9px Arial');
-    text(ctx, `Location: ${location}`, M + 523, 125, NAVY, 'bold 12px Arial');
-    text(ctx, 'All names included; screen searches ignored', M + 523, 140, '#64748b', '8px Arial');
+    text(ctx, `Data as of ${asOf}`, M, 89, '#52677d', '10px Arial');
+    ctx.fillStyle = '#f0f4f9'; ctx.fillRect(M, 98, W - M * 2, 27);
+    text(ctx, 'All ' + chapters.length + ' chapters', M + 9, 115, NAVY, 'bold 11px Arial');
+    text(ctx, registered + '/' + total + ' core roles registered', M + 153, 115, NAVY, 'bold 11px Arial');
+    text(ctx, records.length + ' source records', M + 391, 115, '#52677d', '10px Arial');
+    text(ctx, 'Location: ' + location, M + 571, 115, NAVY, 'bold 10px Arial');
     const colors = { Registered: ['#e6f3e9', '#216c3b'], Unregistered: ['#fbecef', '#a6374b'], 'Pending Verification': ['#ffffff', '#52677d'], 'Not Applicable': ['#ffffff', '#738096'] };
     let legendX = M;
     for (const [label, status, width] of [['Names = Registered', 'Registered', 175], ['— Unregistered', 'Unregistered', 145]]) {
-      ctx.fillStyle = colors[status][0]; ctx.fillRect(legendX, 162, 11, 11);
-      text(ctx, label, legendX + 16, 171, colors[status][1], '9px Arial'); legendX += width;
+      ctx.fillStyle = colors[status][0]; ctx.fillRect(legendX, 134, 11, 11);
+      text(ctx, label, legendX + 16, 143, colors[status][1], '9px Arial'); legendX += width;
     }
-    const widths = [188, 86, 86, 86, 86, 86, 86, 42];
+    if (showLocations) text(ctx, 'B = Bangkok | S = San Diego', M + 365, 143, '#64748b', '9px Arial');
+    const widths = [176, 88, 88, 88, 88, 88, 88, 42];
     const plans = [...chapters].sort((a, b) => a.name.localeCompare(b.name)).map(ch => {
       ctx.font = 'bold 10px Arial'; const chapterLines = wrap(ctx, ch.name, widths[0] - 12);
       const cells = Core.core.map((role, i) => {
         const cell = Core.cell(ch, role, records, loaded); ctx.font = '10px Arial';
-        const lines = cell.records.flatMap(r => wrap(ctx, (r.name || 'Name not supplied') + (location === 'All' ? ` (${r.location})` : ''), widths[i + 1] - 12));
+        const officers = new Map();
+        for (const r of cell.records) {
+          const key = Core.norm(r.name) + '|' + r.status;
+          if (!officers.has(key)) officers.set(key, { name: r.name || 'Name not supplied', locations: new Set() });
+          officers.get(key).locations.add(r.location === 'Bangkok' ? 'B' : r.location === 'San Diego' ? 'S' : r.location);
+        }
+        const lines = [...officers.values()].flatMap(r => wrap(ctx, r.name + (showLocations ? ' ' + [...r.locations].sort().join('/') : ''), widths[i + 1] - 12));
         return { ...cell, lines };
       });
       const height = Math.max(27, chapterLines.length * 12 + 9, ...cells.map(cell => cell.lines.length * 12 + 9));
@@ -968,13 +974,12 @@ const PdfReport = (() => {
     ctx.font = '10px Arial';
     const nonCorePlans = nonCore.map(r => wrap(ctx, `${r.chapter} | ${Core.roles[r.role]} | ${r.name || 'Name not supplied'} | ${r.location} | ${r.displaySession || 'Session not supplied'} | ${Core.visibleStatus(r.status)}`, W - M * 2 - 12));
     const bodyHeight = 28 + plans.reduce((sum, row) => sum + row.height, 0) + (nonCore.length ? 28 + nonCorePlans.reduce((sum, lines) => sum + lines.length * 12 + 7, 0) : 0);
-    const availableHeight = H - 257;
+    const tableTop = 154;
+    const availableHeight = H - tableTop - 64;
     const fit = Math.min(1, availableHeight / bodyHeight);
-    ctx.save(); ctx.translate(M, 184); ctx.scale(fit, fit);
-    const reportWidth = (W - M * 2) / fit;
-    // Expand spare horizontal room when vertical fitting is needed, retaining all rows and names.
-    const xScale = reportWidth / (W - M * 2);
-    ctx.scale(xScale, 1);
+    // Keep the same horizontal and vertical scale so letters never flatten.
+    const left = M + (W - M * 2) * (1 - fit) / 2;
+    ctx.save(); ctx.translate(left, tableTop); ctx.scale(fit, fit);
     ctx.fillStyle = NAVY; ctx.fillRect(0, 0, W - M * 2, 28);
     let x = 0;
     ['Chapter', ...Core.core, 'Total'].forEach((label, i) => { text(ctx, label, x + 6, 18, '#ffffff', 'bold 10px Arial'); x += widths[i]; });
@@ -998,7 +1003,7 @@ const PdfReport = (() => {
       for (const lines of nonCorePlans) { lines.forEach((line, i) => text(ctx, line, 6, y + 11 + i * 12, '#263d59', '10px Arial')); y += lines.length * 12 + 7; }
     }
     ctx.restore();
-    const notesY = Math.min(H - 56, 184 + bodyHeight * fit + 15);
+    const notesY = Math.min(H - 56, tableTop + bodyHeight * fit + 15);
     text(ctx, 'CC Chair | LO Learning | ALO Assistant Learning | FO Forum | MO Membership | MEO Member Engagement', M, notesY, '#64748b', '8px Arial');
     if (!nonCore.length) text(ctx, 'SPO / SFO / Family: no registrations identified. Non-core applicability is unconfirmed.', M, notesY + 13, '#64748b', '8px Arial');
     ctx.strokeStyle = '#dce3ec'; ctx.beginPath(); ctx.moveTo(M, H - 34); ctx.lineTo(W - M, H - 34); ctx.stroke();
@@ -1200,7 +1205,7 @@ export default function App() {
   ];
   return <div className="ypo-dashboard">
     <style>{DASHBOARD_CSS}</style>
-    <header><div><div className="eyebrow">Middle East & North Africa</div><h1>MENA GLC Registrations <span style={{ fontWeight: "normal", opacity: .6 }}>/ 2027</span></h1><p>Bangkok · 15–16 March 2027 &nbsp; | &nbsp; San Diego · 3–4 May 2027</p></div></header>
+    <header><div><div className="eyebrow">Middle East & North Africa</div><h1 style={{ fontWeight: 800 }}>MENA GLC Registrations 2027</h1><p>Bangkok · 15–16 March 2027 &nbsp; | &nbsp; San Diego · 3–4 May 2027</p></div></header>
     <main><div className="topline"><div><span className="eyebrow" style={{ color: "#64748b" }}>Registration intelligence</span><p className="muted" style={{ margin: "6px 0 0" }}>Data as of <b>{selected.map(s => `${s.location}: ${s.date}`).join(" · ")}</b></p></div><div className="actions"><button className="btn" disabled={savingPdf} onClick={saveAllChaptersPdf} title="Includes every chapter and officer name for the selected report and location, regardless of chapter, officer, role or status filters.">{savingPdf ? "Saving PDF…" : "↓ Save PDF — all chapters"}</button><button className="btn" onClick={() => setModal({ kind: "history", title: "Weekly history & backups" })}>Weekly history & backups</button><button className="btn" onClick={exportDetails}>↓ Export CSV</button><button className="btn primary" onClick={() => { setImportForm({ location: filters.location === "San Diego" ? "San Diego" : "Bangkok", date: todayDubai(), mode: "complete", filename: "", sheet: 0, sheets: [] }); setImportError(""); setModal({ kind: "import", title: "Import weekly registration report" }); }}>↑ Import weekly report</button></div></div>
       <div className="notice">{missingLocations.length > 0 && <><b>{missingLocations.join(" and ")} data not loaded.</b> </>}Registration tracking for the 2027 cycle. {missingLocations.length > 0 ? "Unregistered means no matching record in the loaded location data; coverage across both locations is incomplete. " : "Both locations have an imported report. "}{filters.name && "Officer search limits coverage to matching names. "}All metrics reflect the active filters. {!storageOK && <b>Browser storage unavailable. Export history before closing.</b>}</div>
       <div className="stats">{stats.map(([label, value, note]) => <div className="stat" key={label}><label>{label}</label><strong>{value}</strong><small>{note}</small></div>)}</div>
