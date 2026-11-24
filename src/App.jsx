@@ -876,6 +876,137 @@ return {roles,core,non,norm,applicable,process,diff,csv,cell,cleanRow,refreshSna
 })();
 
 
+// Creates a downloadable PDF in the browser without third-party packages.
+// Canvas uses the browser's Unicode fonts so officer names retain their accents.
+const PdfReport = (() => {
+  const W = 1123, H = 794, M = 28, NAVY = '#002F6C';
+  function wrap(ctx, value, width) {
+    const result = [];
+    for (const paragraph of String(value ?? '').split('\n')) {
+      let line = '';
+      for (const word of paragraph.split(/\s+/).filter(Boolean)) {
+        if (ctx.measureText(line ? line + ' ' + word : word).width <= width) { line = line ? line + ' ' + word : word; continue; }
+        if (line) { result.push(line); line = ''; }
+        // Split very long names/words rather than letting them overlap a column.
+        for (const letter of word) {
+          if (ctx.measureText(line + letter).width > width && line) { result.push(line); line = ''; }
+          line += letter;
+        }
+      }
+      result.push(line);
+    }
+    return result.length ? result : [''];
+  }
+  const text = (ctx, value, x, y, color = '#172d4c', font = '12px Arial') => { ctx.fillStyle = color; ctx.font = font; ctx.fillText(String(value), x, y); };
+  function bytes(value) { return new TextEncoder().encode(value); }
+  function assemblePdf(images) {
+    const pieces = [], offsets = [0]; let length = 0;
+    const append = value => { const part = typeof value === 'string' ? bytes(value) : value; pieces.push(part); length += part.length; };
+    const object = (number, content) => { offsets[number] = length; append(`${number} 0 obj\n`); content(); append('\nendobj\n'); };
+    append('%PDF-1.4\n');
+    object(1, () => append('<< /Type /Catalog /Pages 2 0 R >>'));
+    object(2, () => append(`<< /Type /Pages /Count ${images.length} /Kids [${images.map((_, i) => `${3 + i * 3} 0 R`).join(' ')}] >>`));
+    images.forEach((jpeg, i) => {
+      const page = 3 + i * 3, image = page + 1, stream = page + 2;
+      object(page, () => append(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 841.89 595.28] /Resources << /XObject << /Im${i} ${image} 0 R >> >> /Contents ${stream} 0 R >>`));
+      object(image, () => { append(`<< /Type /XObject /Subtype /Image /Width ${W * 2} /Height ${H * 2} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>\nstream\n`); append(jpeg); append('\nendstream'); });
+      const commands = `q\n841.89 0 0 595.28 0 0 cm\n/Im${i} Do\nQ\n`;
+      object(stream, () => append(`<< /Length ${bytes(commands).length} >>\nstream\n${commands}endstream`));
+    });
+    const xref = length, count = 3 + images.length * 3;
+    append(`xref\n0 ${count}\n0000000000 65535 f \n`);
+    for (let i = 1; i < count; i++) append(`${String(offsets[i]).padStart(10, '0')} 00000 n \n`);
+    append(`trailer\n<< /Size ${count} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+    return new Blob(pieces, { type: 'application/pdf' });
+  }
+  async function generate({ chapters, snapshots, location = 'All', logo }) {
+    if (document.fonts?.ready) await document.fonts.ready;
+    let brand = null;
+    if (logo) { try { brand = new Image(); brand.src = logo; await brand.decode(); } catch { brand = null; } }
+    const records = snapshots.flatMap(s => s.records).filter(r => location === 'All' || r.location === location);
+    const loaded = location === 'All' ? ['Bangkok', 'San Diego'].every(l => snapshots.some(s => s.location === l)) : snapshots.some(s => s.location === location);
+    const sourceReports = snapshots.filter(s => location === 'All' || s.location === location);
+    const asOf = sourceReports.map(s => `${s.location}: ${s.date}`).join(' | ') || 'No report loaded for this location';
+    const total = chapters.reduce((sum, ch) => sum + Core.core.filter(r => Core.applicable(ch, r)).length, 0);
+    const registered = chapters.reduce((sum, ch) => sum + Core.core.filter(r => Core.applicable(ch, r) && Core.cell(ch, r, records, loaded).status === 'Registered').length, 0);
+    const pages = []; let canvas, ctx, y;
+    function page(section, continuation = false) {
+      canvas = document.createElement('canvas'); canvas.width = W * 2; canvas.height = H * 2;
+      ctx = canvas.getContext('2d'); if (!ctx) throw Error('PDF drawing is not supported in this browser.');
+      ctx.scale(2, 2); ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = NAVY; ctx.fillRect(0, 0, W, 80);
+      text(ctx, 'YPO MENA | GLC 2027 Registration Report', M, 32, '#ffffff', 'bold 23px Arial');
+      text(ctx, 'Bangkok: 15-16 March 2027   |   San Diego: 3-4 May 2027', M, 57, '#d7e5f6', '12px Arial');
+      if (brand) { ctx.fillStyle = '#ffffff'; ctx.fillRect(W - 183, 18, 155, 43); const scale = Math.min(145 / brand.naturalWidth, 35 / brand.naturalHeight); const bw = brand.naturalWidth * scale, bh = brand.naturalHeight * scale; ctx.drawImage(brand, W - 178 + (145 - bw) / 2, 22 + (35 - bh) / 2, bw, bh); }
+      text(ctx, `${section}${continuation ? ' (continued)' : ''}`, M, 105, NAVY, 'bold 16px Arial');
+      text(ctx, `All ${chapters.length} chapters | Location: ${location} | ${asOf}`, M, 125, '#52677d', '11px Arial');
+      text(ctx, `${registered}/${total} applicable core roles registered (${total ? (registered / total * 100).toFixed(1) : '0.0'}%) | ${records.length} source records`, M, 143, '#172d4c', 'bold 11px Arial');
+      text(ctx, 'Includes every chapter and officer name. Chapter, officer, role and status filters are not applied.', M, 160, '#64748b', '10px Arial');
+      y = 177;
+      pages.push(canvas);
+    }
+    const widths = [225, 127, 127, 127, 127, 127, 127, 80];
+    function headings() {
+      let x = M; ctx.fillStyle = NAVY; ctx.fillRect(M, y, W - M * 2, 38);
+      ['Chapter / type', ...Core.core, 'Registered'].forEach((label, i) => { text(ctx, label, x + 8, y + 16, '#ffffff', 'bold 11px Arial'); if (i > 0 && i < 7) text(ctx, Core.roles[label].replace('Officer', 'Off.'), x + 8, y + 30, '#d7e5f6', '8px Arial'); x += widths[i]; });
+      y += 38;
+    }
+    page('Core role registrations'); headings();
+    const colors = { Registered: ['#e1f3e6', '#216c3b'], Unregistered: ['#fce9ec', '#a6374b'], 'Pending Verification': ['#fff0ce', '#885d05'], 'Not Applicable': ['#e8edf4', '#738096'] };
+    const chapterList = [...chapters].sort((a, b) => a.name.localeCompare(b.name));
+    for (let index = 0; index < chapterList.length; index++) {
+      const ch = chapterList[index]; let maxLines = 0;
+      const cells = Core.core.map(role => {
+        const cell = Core.cell(ch, role, records, loaded); ctx.font = '12px Arial';
+        const lines = cell.records.flatMap(r => wrap(ctx, (r.name || 'Name not supplied') + (location === 'All' ? ` (${r.location})` : ''), 111));
+        maxLines = Math.max(maxLines, lines.length); return { ...cell, lines };
+      });
+      ctx.font = 'bold 12px Arial'; const chapterLines = wrap(ctx, ch.name, 209);
+      const height = Math.max(43, 29 + maxLines * 14, 24 + chapterLines.length * 15);
+      if (height > H - 260) throw Error('A chapter has too many registrations for one report row. Please export the detailed CSV for this report.');
+      if (y + height > H - 49) { page('Core role registrations', true); headings(); }
+      ctx.fillStyle = index % 2 ? '#f5f8fc' : '#ffffff'; ctx.fillRect(M, y, W - M * 2, height);
+      ctx.fillStyle = NAVY; ctx.fillRect(M, y, widths[0], height);
+      chapterLines.forEach((line, i) => text(ctx, line, M + 8, y + 17 + i * 15, '#ffffff', 'bold 12px Arial'));
+      text(ctx, ch.type, M + 8, y + 20 + chapterLines.length * 15, '#c2d2e6', '10px Arial');
+      let x = M + widths[0];
+      cells.forEach((cell, i) => {
+        const [bg, color] = colors[cell.status]; ctx.fillStyle = bg; ctx.fillRect(x + 6, y + 6, widths[i + 1] - 12, 16);
+        text(ctx, cell.status, x + 10, y + 17, color, '9px Arial');
+        cell.lines.forEach((line, j) => text(ctx, line, x + 8, y + 36 + j * 14, '#263d59', '12px Arial')); x += widths[i + 1];
+      });
+      const roles = Core.core.filter(r => Core.applicable(ch, r));
+      text(ctx, `${roles.filter(r => Core.cell(ch, r, records, loaded).status === 'Registered').length}/${roles.length}`, x + 14, y + 23, NAVY, 'bold 13px Arial');
+      ctx.strokeStyle = '#d9e2ee'; ctx.lineWidth = .7; ctx.beginPath(); ctx.moveTo(M, y + height); ctx.lineTo(W - M, y + height); ctx.stroke();
+      y += height;
+    }
+    // Include all available non-core names and sessions; absence does not imply applicability.
+    const nonCore = records.filter(r => Core.non.includes(r.role) && r.scope === 'Chapter');
+    if (nonCore.length) {
+      page('Non-core officer registrations');
+      for (const r of nonCore.sort((a, b) => a.chapter.localeCompare(b.chapter))) {
+        ctx.font = '12px Arial'; const lines = wrap(ctx, `${r.name || 'Name not supplied'} | ${Core.roles[r.role]} | ${r.location} | ${r.displaySession || 'Session not supplied'} | ${r.status}`, W - M * 2 - 20);
+        const height = 32 + lines.length * 16;
+        if (y + height > H - 70) page('Non-core officer registrations', true);
+        text(ctx, r.chapter, M, y + 16, NAVY, 'bold 12px Arial'); lines.forEach((line, i) => text(ctx, line, M, y + 35 + i * 16)); y += height + 10;
+      }
+    } else {
+      if (y + 27 > H - 49) page('Registration notes');
+      text(ctx, 'Non-core roles (SPO, SFO, Family): no registrations identified in the selected report. Applicability is unconfirmed.', M, y + 20, '#64748b', '10px Arial');
+    }
+    const images = [];
+    for (let i = 0; i < pages.length; i++) {
+      const c = pages[i], context = c.getContext('2d'); context.save();
+      text(context, loaded ? 'Registration does not establish attendance. Regional/delivery staff are excluded from chapter coverage.' : 'Selected-location data is incomplete. Missing registrations await verification; registration does not establish attendance.', M, H - 20, '#64748b', '10px Arial');
+      text(context, `Page ${i + 1} of ${pages.length}`, W - 100, H - 20, '#64748b', '10px Arial'); context.restore();
+      const data = c.toDataURL('image/jpeg', .94).split(',')[1]; const binary = atob(data); images.push(Uint8Array.from(binary, ch => ch.charCodeAt(0)));
+    }
+    return assemblePdf(images);
+  }
+  return { generate };
+})();
+
+
 // Browser-native .xlsx reader for current Edge/Chrome; CSV is also supported.
 async function readXlsx(buffer){const view=new DataView(buffer),bytes=new Uint8Array(buffer),decoder=new TextDecoder();let end=-1;for(let i=bytes.length-22;i>=Math.max(0,bytes.length-65557);i--)if(view.getUint32(i,true)===0x06054b50){end=i;break;}if(end<0)throw Error('This is not a readable .xlsx file. Save it as Excel Workbook (.xlsx) or CSV.');const n=view.getUint16(end+10,true),files=new Map();let at=view.getUint32(end+16,true);for(let i=0;i<n;i++){if(view.getUint32(at,true)!==0x02014b50)throw Error('Invalid Excel archive.');const method=view.getUint16(at+10,true),size=view.getUint32(at+20,true),ulen=view.getUint32(at+24,true),nl=view.getUint16(at+28,true),el=view.getUint16(at+30,true),cl=view.getUint16(at+32,true),offset=view.getUint32(at+42,true),name=decoder.decode(bytes.slice(at+46,at+46+nl));if(ulen>30000000)throw Error('Workbook sheet exceeds the 30 MB uncompressed limit.');files.set(name,{method,size,offset});at+=46+nl+el+cl;}
  async function xml(path){const f=files.get(path);if(!f)return null;let p=f.offset+30+view.getUint16(f.offset+26,true)+view.getUint16(f.offset+28,true),data=bytes.slice(p,p+f.size);if(f.method===8)data=new Uint8Array(await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer());else if(f.method!==0)throw Error('Excel compression is not supported. Please use CSV.');const doc=new DOMParser().parseFromString(decoder.decode(data),'application/xml');if(doc.querySelector('parsererror'))throw Error('Workbook XML cannot be read.');return doc;}
@@ -938,6 +1069,7 @@ export default function App() {
   const [tableSort, setTableSort] = useState({ key: "name", direction: 1 });
   const [modal, setModal] = useState(null);
   const [message, setMessage] = useState("");
+  const [savingPdf, setSavingPdf] = useState(false);
   const [importForm, setImportForm] = useState({ location: "Bangkok", date: todayDubai(), mode: "complete", filename: "", sheet: 0, sheets: [] });
   const [importError, setImportError] = useState("");
   const [reading, setReading] = useState(false);
@@ -974,6 +1106,15 @@ export default function App() {
     downloadFile("YPO-MENA-GLC-2027-registrations.csv", "\uFEFF" + [columns, ...rows].map(row => row.map(safe).join(",")).join("\r\n"), "text/csv;charset=utf-8");
     setMessage("Exported the registration records in the current filtered view.");
   };
+  async function saveAllChaptersPdf() {
+    setSavingPdf(true);
+    try {
+      const pdf = await PdfReport.generate({ chapters: SEED.chapters, snapshots: selected, location: filters.location, logo: SEED.logo });
+      downloadFile('YPO-MENA-GLC-2027-All-Chapters-' + filters.location.replace(/\s+/g, '-') + '.pdf', pdf, "application/pdf");
+      setMessage("PDF saved for all 27 chapters, including every officer name. Uses the selected report and location; other filters are ignored.");
+    } catch (error) { setMessage("Could not save PDF: " + error.message); }
+    finally { setSavingPdf(false); }
+  }
   const importPreview = useMemo(() => {
     if (!importForm.sheets.length) return null;
     try {
@@ -1027,7 +1168,7 @@ export default function App() {
         const coverage = model.coverage(ch);
         return <tr key={ch.name}><td className="chapter">{ch.name}<small className={ch.type === "YPO Gold" ? "gold" : ""}>{ch.type}</small></td>{keys.map(role => {
           const cell = model.getCell(ch, role); const visible = filters.status === "All" || cell.status === filters.status;
-          return <td key={role} className="center">{visible ? <button className="cellbtn" title={cell.records.map(r => `${r.name} · ${r.displaySession}`).join("\n") || cell.status} onClick={() => openRecords(cell.records, `${ch.name} · ${Core.roles[role]}`)}><StatusBadge status={cell.status} />{cell.conflict && <span className="officer" style={{ color: "#996309" }}>⚠ Registration requires review</span>}{cell.records.length > 0 && <span className="officer">{cell.records[0].name}{cell.records.length > 1 ? ` +${cell.records.length - 1} more` : ""}</span>}</button> : <span className="muted">Filtered out</span>}</td>;
+          return <td key={role} className="center">{visible ? <button className="cellbtn" title={cell.records.map(r => `${r.name} · ${r.displaySession}`).join("\n") || cell.status} onClick={() => openRecords(cell.records, `${ch.name} · ${Core.roles[role]}`)}><StatusBadge status={cell.status} />{cell.conflict && <span className="officer" style={{ color: "#996309" }}>⚠ Registration requires review</span>}{cell.records.map((record, i) => <span className="officer" key={`${record.id}-${i}`}>{record.name || "Name not supplied"}</span>)}</button> : <span className="muted">Filtered out</span>}</td>;
         })}{!nonCore && <td className="coverage"><b>{coverage.registered}/{coverage.applicable}</b><div className="bar"><i style={{ width: `${coverage.applicable ? coverage.registered / coverage.applicable * 100 : 0}%` }} /></div></td>}</tr>;
       })}</tbody></table>{(!keys.length || !model.chapters.length) && <div className="empty">No matching chapters or roles. Adjust or reset filters.</div>}</div><div className="legend">{Object.keys(STATUS_CLASS).map(status => <StatusBadge key={status} status={status} />)}</div></>;
   }
@@ -1057,7 +1198,7 @@ export default function App() {
   return <div className="ypo-dashboard">
     <style>{DASHBOARD_CSS}</style>
     <header><div><div className="eyebrow">Middle East & North Africa</div><h1>MENA GLC Registrations <span style={{ fontWeight: "normal", opacity: .6 }}>/ 2027</span></h1><p>Bangkok · 15–16 March 2027 &nbsp; | &nbsp; San Diego · 3–4 May 2027</p></div><img src={SEED.logo} alt="YPO" /></header>
-    <main><div className="topline"><div><span className="eyebrow" style={{ color: "#64748b" }}>Registration intelligence</span><p className="muted" style={{ margin: "6px 0 0" }}>Data as of <b>{selected.map(s => `${s.location}: ${s.date}`).join(" · ")}</b></p></div><div className="actions"><button className="btn" onClick={() => setModal({ kind: "history", title: "Weekly history & backups" })}>Weekly history & backups</button><button className="btn" onClick={exportDetails}>↓ Export CSV</button><button className="btn primary" onClick={() => { setImportForm({ location: filters.location === "San Diego" ? "San Diego" : "Bangkok", date: todayDubai(), mode: "complete", filename: "", sheet: 0, sheets: [] }); setImportError(""); setModal({ kind: "import", title: "Import weekly registration report" }); }}>↑ Import weekly report</button></div></div>
+    <main><div className="topline"><div><span className="eyebrow" style={{ color: "#64748b" }}>Registration intelligence</span><p className="muted" style={{ margin: "6px 0 0" }}>Data as of <b>{selected.map(s => `${s.location}: ${s.date}`).join(" · ")}</b></p></div><div className="actions"><button className="btn" disabled={savingPdf} onClick={saveAllChaptersPdf} title="Includes every chapter and officer name for the selected report and location, regardless of chapter, officer, role or status filters.">{savingPdf ? "Saving PDF…" : "↓ Save PDF — all chapters"}</button><button className="btn" onClick={() => setModal({ kind: "history", title: "Weekly history & backups" })}>Weekly history & backups</button><button className="btn" onClick={exportDetails}>↓ Export CSV</button><button className="btn primary" onClick={() => { setImportForm({ location: filters.location === "San Diego" ? "San Diego" : "Bangkok", date: todayDubai(), mode: "complete", filename: "", sheet: 0, sheets: [] }); setImportError(""); setModal({ kind: "import", title: "Import weekly registration report" }); }}>↑ Import weekly report</button></div></div>
       <div className="notice">{missingLocations.length > 0 && <><b>{missingLocations.join(" and ")} data not loaded.</b> </>}Registration tracking for the 2027 cycle. {missingLocations.length > 0 ? "Unregistered means no matching record in the loaded location data; coverage across both locations is incomplete. " : "Both locations have an imported report. "}{filters.name && "Officer search limits coverage to matching names. "}All metrics reflect the active filters. {!storageOK && <b>Browser storage unavailable. Export history before closing.</b>}</div>
       <div className="stats">{stats.map(([label, value, note]) => <div className="stat" key={label}><label>{label}</label><strong>{value}</strong><small>{note}</small></div>)}</div>
       <div className="filters"><label>Chapter<input type="search" placeholder="Search chapters…" value={filters.chapter} onChange={e => changeFilter("chapter", e.target.value)} /></label><label>Officer name<input type="search" placeholder="Search officers…" value={filters.name} onChange={e => changeFilter("name", e.target.value)} /></label><label>Officer role<select value={filters.role} onChange={e => changeFilter("role", e.target.value)}><option value="All">All officer roles</option>{Object.entries(Core.roles).map(([key, value]) => <option key={key} value={key}>{key} · {value}</option>)}</select></label><label>Training location<select value={filters.location} onChange={e => changeFilter("location", e.target.value)}>{["All", "Bangkok", "San Diego"].map(value => <option key={value}>{value}</option>)}</select></label><label>Registration status<select value={filters.status} onChange={e => changeFilter("status", e.target.value)}>{["All", ...Object.keys(STATUS_CLASS)].map(value => <option key={value}>{value}</option>)}</select></label><label>Chapter order<select value={filters.sort} onChange={e => changeFilter("sort", e.target.value)}><option value="coverage-desc">Coverage: high to low</option><option value="coverage-asc">Coverage: low to high</option><option value="name">Chapter name</option></select></label><button className="btn" onClick={() => setFilters({ chapter: "", name: "", role: "All", location: "Bangkok", status: "All", sort: "coverage-desc" })}>Reset</button></div>
