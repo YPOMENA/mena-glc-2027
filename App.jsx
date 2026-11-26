@@ -1552,17 +1552,6 @@ const SEED = {
         "previouslyTrained": false
       },
       {
-        "sourceRow": 81,
-        "name": "Muddassar Malik",
-        "chapter": "YPO Gold London",
-        "parent": "Europe",
-        "title": "Chapter Assistant Learning Officer",
-        "appointmentStatus": "Elect",
-        "workshopRegistration": "Workshop Registered",
-        "event": "2027 Global Leadership Conference (GLC) San Diego",
-        "previouslyTrained": false
-      },
-      {
         "sourceRow": 82,
         "name": "Shehriar Ashraf",
         "chapter": "YPO Gold Pakistan",
@@ -3587,10 +3576,16 @@ const core=['CC','LO','ALO','FO','MO','MEO'], non=['SPO','SFO','Fam'];
 const norm=s=>String(s??'').normalize('NFC').trim().replace(/\s+/g,' ').toLowerCase();
 const personKey=s=>norm(s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^\p{L}\p{N}]/gu,'');
 let officerRoster={rows:[],date:'',filename:''},knownChapters=[];
-// User-confirmed exception: YPO UAE Integrated has an applicable MEO role.
-const applicable=(ch,r)=>officerRoster.rows.some(x=>x.scope==='Chapter'&&x.chapter===ch.name&&x.role===r)||(r==='MO'?ch.type!=='YPO Gold':r==='MEO'?(ch.type==='YPO Gold'||norm(ch.name)==='ypo uae integrated'):true);
+// Appointing an optional officer never expands the core requirement.
+const applicable=(ch,r)=>r==='MO'?ch.type!=='YPO Gold':r==='MEO'?ch.type==='YPO Gold':true;
+const isRemoved=name=>personKey(name)==='muddassarmalik';
+const cleanRoster=data=>({...data,rows:(data?.rows||[]).filter(r=>!isRemoved(r.name))});
+const optionalAppointment=r=>r.scope==='Chapter'&&core.includes(r.role)&&knownChapters.some(ch=>ch.name===r.chapter&&!applicable(ch,r.role));
+const flagFor=name=>personKey(name)==='talaalsahsah'?'Flag retained: Tala is registered as Saudi MO in the 23 November file; the roster lists Abdulaziz Al Bassam for that role.':personKey(name)==='joseamorim'?'Flag retained: Jose is listed as registered Oman Chair in the 25 November roster but is absent from the 23 November registration file.':'';
+const registrationKey=r=>r.registrationCountKey||(r.raw?'registration:'+JSON.stringify(r.raw):r.id);
+const registrationCount=records=>new Set(records.filter(r=>isIncluded(r)&&r.status==='Registered').map(registrationKey)).size;
 const confirmations=[
- {name:'Isabela Ududec',chapter:'YPO UAE Integrated',role:'MEO',types:['Chapter Member Engagement Officer'],note:'User confirmed Isabela Ududec as registered MEO; MEO applies to YPO UAE Integrated.'},
+ {name:'Isabela Ududec',chapter:'YPO UAE Integrated',role:'MEO',types:['Chapter Member Engagement Officer'],note:'User confirmed Isabela Ududec as registered MEO. This is an optional non-core appointment for this chapter.'},
  {name:'Nuha Abujaber',chapter:'YPO Jordan Integrated',role:'MO',types:['Dual Role Officer','Chapter Membership Officer'],note:'User confirmed Nuha Abujaber as chapter Membership Officer (MO).'}
 ];
 function roleOf(s){s=norm(s).replace(/spouse\s*\/\s*partner/g,'spouse partner'); if(/assistant learning/.test(s))return 'ALO';if(/spouse.*forum/.test(s))return 'SFO';if(/spouse|partner officer/.test(s))return 'SPO';if(/family officer/.test(s))return 'Fam';if(/member engagement/.test(s))return 'MEO';if(/membership officer/.test(s))return 'MO';if(/learning officer/.test(s))return 'LO';if(/forum officer/.test(s))return 'FO';if(/(?:chapter|regional) chair/.test(s))return 'CC';return null;}
@@ -3600,12 +3595,13 @@ function isNetworkOfficer(raw,name){
  const fields=['Registration Type','Officer Role','Admission Item','Role Scope','Officer Scope','Officer Level','Officer Category','Registration Category'];
  return norm(name)==='karin troy'||fields.some(key=>/\bnetworks?\b/i.test(String(raw[key]||'')));
 }
-const isIncluded=record=>!['Network','Community','External'].includes(record.scope)&&!record.excluded;
+const isIncluded=record=>!isRemoved(record.name)&&!['Network','Community','External'].includes(record.scope)&&!record.excluded;
 const reportRecords=records=>records.filter(isIncluded);
 function process(rows,chapters,location){let seen=new Set(),duplicates=0;const out=[];for(let [index,input] of rows.entries()){
  const raw=cleanRow(input);const fingerprint=JSON.stringify(Object.entries(raw).sort());if(seen.has(fingerprint)){duplicates++;continue;}seen.add(fingerprint);
  const get=(...keys)=>keys.map(k=>raw[k]).find(v=>v)||'';
  const name=get('Full Name','Officer Name')||[get('First Name'),get('Last Name')].filter(Boolean).join(' '), chapter=get('Primary Chapter','Chapter'), type=get('Registration Type','Officer Role'), session=get('Sessions (Optional)','Workshop/session','Workshop','Session'), loc=get('Location','Training location')||location||'';
+ if(isRemoved(name))continue;
  const network=isNetworkOfficer(raw,name);
  const ch=chapters.find(c=>norm(c.name)===norm(chapter)), regional=/^regional /i.test(type), delivery=/delivery team/i.test(type), dual=/dual role/i.test(type);
  let role=roleOf(type);const sessionRoles=[...new Set(session.split(/[,;\n]/).map(roleOf).filter(Boolean))];let issues=[];
@@ -3616,7 +3612,7 @@ function process(rows,chapters,location){let seen=new Set(),duplicates=0;const o
  else if(dual||!role){role=sessionRoles.length===1?sessionRoles[0]:null;issues.push(dual?'Dual-role appointment needs confirmation':'Officer role needs mapping');}
  const confirmation=!network&&confirmations.find(c=>norm(c.name)===norm(name)&&norm(c.chapter)===norm(chapter)&&c.types.some(t=>norm(t)===norm(type)));
  if(confirmation){role=confirmation.role;scope='Chapter';issues=issues.filter(issue=>issue!=='Dual-role appointment needs confirmation'&&issue!=='Officer role needs mapping');}
- if(scope==='Chapter'&&role&&ch&&!applicable(ch,role))issues.push('Role conflicts with reference chapter applicability');
+ // Optional chapter appointments are valid registrations, not core conflicts.
  if(role&&sessionRoles.length&&(!sessionRoles.includes(role)||sessionRoles.length>1))issues.push('Workshop and officer role need clarification');
  const sourceStatus=get('Registration Status','Status');if(sourceStatus&&!/^(registered|confirmed|active)$/i.test(sourceStatus))issues.push('Source status requires review: '+sourceStatus);
  const date=get('Last Registration Date (GMT-05:00) Eastern [US & Canada]','Registration date','Registration Date');
@@ -3626,23 +3622,23 @@ function process(rows,chapters,location){let seen=new Set(),duplicates=0;const o
  }return {records:out.map(enrich),sourceRows:rows.length,duplicates};}
 function diff(prev,next){const buckets=arr=>{let m=new Map();for(const r of arr){if(!m.has(r.id))m.set(r.id,[]);m.get(r.id).push(r);}return m;};const a=buckets(prev),b=buckets(next),added=[],missing=[],changed=[];for(const k of new Set([...a.keys(),...b.keys()])){let aa=[...(a.get(k)||[])],bb=[...(b.get(k)||[])];for(let i=aa.length-1;i>=0;i--){const j=bb.findIndex(r=>JSON.stringify(r.raw)===JSON.stringify(aa[i].raw));if(j>=0){aa.splice(i,1);bb.splice(j,1);}}while(aa.length&&bb.length)changed.push({before:aa.shift(),after:bb.shift()});missing.push(...aa);added.push(...bb);}return {added,missing,changed};}
 function csv(text){text=text.replace(/^\uFEFF/,'');const sep=(text.split(/\r?\n/)[0].match(/;/g)||[]).length>(text.split(/\r?\n/)[0].match(/,/g)||[]).length?';':',';let rows=[],row=[],field='',quoted=false;for(let i=0;i<text.length;i++){let c=text[i];if(c==='"'){if(quoted&&text[i+1]==='"'){field+='"';i++;}else quoted=!quoted;}else if(c===sep&&!quoted){row.push(field);field='';}else if((c==='\n'||c==='\r')&&!quoted){if(c==='\r'&&text[i+1]==='\n')i++;row.push(field);if(row.some(x=>x.trim()))rows.push(row);row=[];field='';}else field+=c;}if(quoted)throw Error('CSV contains an unfinished quoted field.');row.push(field);if(row.some(x=>x.trim()))rows.push(row);if(rows.length<2)throw Error('No registration rows found.');let headers=rows.shift().map(h=>h.trim());if(new Set(headers).size!==headers.length)throw Error('Duplicate column headings found.');return rows.map((r,i)=>{if(r.length!==headers.length)throw Error('Column count differs at CSV row '+(i+2));return Object.fromEntries(headers.map((h,j)=>[h,r[j]]));});}
-function cell(ch,r,records,loaded=true){const related=records.filter(x=>isIncluded(x)&&x.chapter===ch.name&&x.role===r&&x.scope==='Chapter');const good=related.filter(x=>x.status==='Registered'),prior=related.filter(x=>x.previouslyTrained);return {records:related,status:!applicable(ch,r)?'Not Applicable':good.length?'Registered':prior.length?'Previously trained':related.some(x=>x.status==='Unregistered')?'Unregistered':related.length||!loaded?'Pending Verification':'Unregistered',conflict:!applicable(ch,r)&&related.length>0};}
+function cell(ch,r,records,loaded=true){const related=records.filter(x=>isIncluded(x)&&x.chapter===ch.name&&x.role===r&&x.scope==='Chapter');const good=related.filter(x=>x.status==='Registered'),prior=related.filter(x=>x.previouslyTrained);return {records:related,status:!applicable(ch,r)?'Not Applicable':good.length?'Registered':prior.length?'Previously trained':related.some(x=>x.status==='Unregistered')?'Unregistered':related.length||!loaded?'Pending Verification':'Unregistered',conflict:false,optional:!applicable(ch,r)};}
 // Only these two labels are presented to users; other internal states stay blank.
 const visibleStatus=status=>['Registered','Unregistered','Previously trained'].includes(status)?status:'';
-function refreshSnapshot(snapshot,chapters){return {...snapshot,records:snapshot.records.map(record=>record.raw?{...process([record.raw],chapters,snapshot.location).records[0],sourceRow:record.sourceRow}:record)};}
+function refreshSnapshot(snapshot,chapters){return {...snapshot,records:snapshot.records.filter(r=>!isRemoved(r.name)).map(record=>record.raw?{...process([record.raw],chapters,snapshot.location).records[0],sourceRow:record.sourceRow}:record).filter(r=>r.name&&!isRemoved(r.name))};}
 const reportingDiff=(prev,next)=>diff(reportRecords(prev),reportRecords(next));
 function setRoster(data,chapters){
- knownChapters=chapters;officerRoster={...data,rows:(data?.rows||[]).map(x=>{
+ knownChapters=chapters;officerRoster={...data,rows:(data?.rows||[]).filter(x=>!isRemoved(x.name)).map(x=>{
   const scope=isNetworkOfficer({'Officer Role':x.title},x.name)?'Network':/^Community /i.test(x.title)?'Community':/^Regional /i.test(x.title)&&norm(x.chapter)==='middle east/north africa'?'Regional':/^Chapter /i.test(x.title)&&chapters.some(ch=>ch.name===x.chapter)?'Chapter':'External';
   return {...x,id:'roster-'+x.sourceRow,scope,role:roleOf(x.title),previouslyTrained:x.previouslyTrained===true,location:/San Diego/i.test(x.event)?'San Diego':/Bangkok/i.test(x.event)?'Bangkok':'',excluded:!['Chapter','Regional'].includes(scope)};
  })};return officerRoster;
 }
 const getRoster=()=>officerRoster;
 const sameAppointment=(r,x)=>r.scope===x.scope&&personKey(r.name)===personKey(x.name)&&(r.role? r.role===x.role : norm(r.type||r.title)===norm(x.title))&&(r.scope!=='Chapter'||r.chapter===x.chapter);
-function enrich(record){const matches=officerRoster.rows.filter(x=>sameAppointment(record,x));return {...record,previouslyTrained:matches.some(x=>x.previouslyTrained),rosterRows:matches.map(x=>x.sourceRow),rosterMatched:matches.length>0,source:record.source||'Registration file'};}
+function enrich(record){const matches=officerRoster.rows.filter(x=>sameAppointment(record,x));return {...record,previouslyTrained:matches.some(x=>x.previouslyTrained),rosterRows:matches.map(x=>x.sourceRow),rosterMatched:matches.length>0,source:record.source||'Registration file',reviewFlag:flagFor(record.name)};}
 function hasLocation(snapshots,location){return snapshots.some(s=>s.location===location)||officerRoster.rows.some(x=>isIncluded(x)&&x.location===location&&/Workshop Registered/i.test(x.workshopRegistration));}
 function viewRecords(snapshots,location='All'){
- const source=snapshots.flatMap(s=>s.records).map(r=>r.raw?{...process([r.raw],knownChapters,r.location).records[0],sourceRow:r.sourceRow}:enrich(r)).filter(r=>location==='All'||r.location===location);
+ const source=snapshots.flatMap(s=>s.records).filter(r=>!isRemoved(r.name)).map(r=>r.raw?{...process([r.raw],knownChapters,r.location).records[0],sourceRow:r.sourceRow}:enrich(r)).filter(r=>location==='All'||r.location===location);
  const result=[...source];
  for(const x of officerRoster.rows){
   if(source.some(r=>sameAppointment(r,x)))continue;
@@ -3650,13 +3646,14 @@ function viewRecords(snapshots,location='All'){
   const hasRegistration=/^Workshop Registered$/i.test(x.workshopRegistration)&&!!x.location&&(!active||active.date<=officerRoster.date);
   const registeredHere=hasRegistration&&(location==='All'||location===x.location);
   const status=registeredHere?'Registered':x.previouslyTrained?'Previously trained':'Unregistered';
-  result.push({id:x.id,name:x.name,chapter:x.chapter,sourceChapter:x.chapter,type:x.title,role:x.role,scope:x.scope,location:registeredHere?x.location:'',status,previouslyTrained:x.previouslyTrained,source:'Officer roster',dataAsOf:officerRoster.date,sourceRow:x.sourceRow,rosterRows:[x.sourceRow],rosterMatched:true,displaySession:'',session:'',date:'',issues:[],confirmation:'',excluded:x.excluded,exclusionReason:x.excluded?x.scope+' appointment - excluded from MENA reporting':'',registeredElsewhere:hasRegistration&&!registeredHere?x.location:'',raw:{'Full Name':x.name,'Officer Role':x.title,'Chapter':x.chapter,'Previously Trained':String(x.previouslyTrained)}});
+  const linked=registeredHere&&source.find(r=>r.status==='Registered'&&r.location===x.location&&personKey(r.name)===personKey(x.name));
+  result.push({id:x.id,name:x.name,chapter:x.chapter,sourceChapter:x.chapter,type:x.title,role:x.role,scope:x.scope,location:registeredHere?x.location:'',status,previouslyTrained:x.previouslyTrained,source:linked?'Officer roster — appointment linked to existing registration':'Officer roster',registrationCountKey:linked?registrationKey(linked):'roster:'+x.id,linkedRegistrationId:linked?.id||'',reviewFlag:flagFor(x.name),dataAsOf:officerRoster.date,sourceRow:x.sourceRow,rosterRows:[x.sourceRow],rosterMatched:true,displaySession:'',session:'',date:'',issues:[],confirmation:'',excluded:x.excluded,exclusionReason:x.excluded?x.scope+' appointment - excluded from MENA reporting':'',registeredElsewhere:hasRegistration&&!registeredHere?x.location:'',raw:{'Full Name':x.name,'Officer Role':x.title,'Chapter':x.chapter,'Previously Trained':String(x.previouslyTrained)}});
  }
  return result;
 }
 function reconcile(registrations){
  const findings=[];
- const add=(category,r,detail,match)=>findings.push({category,name:r.name,chapter:r.chapter,role:r.type||r.title,registrationStatus:r.status||r.workshopRegistration,rosterRows:match?.map(x=>x.sourceRow).join(', ')||'',detail});
+ const add=(category,r,detail,match)=>findings.push({category,name:r.name,chapter:r.chapter,role:r.type||r.title,registrationStatus:r.status||r.workshopRegistration,rosterRows:match?.map(x=>x.sourceRow).join(', ')||'',flagged:!!flagFor(r.name),detail});
  for(const r of registrations.filter(x=>isIncluded(x)&&['Chapter','Regional'].includes(x.scope))){
   const exact=officerRoster.rows.filter(x=>sameAppointment(r,x));
   if(exact.length){if(!exact.some(x=>/Workshop Registered/i.test(x.workshopRegistration)&&x.location===r.location))add('Registration status differs',r,'The registration file identifies '+r.location+' registration, while the roster does not confirm that event for the same appointment. The registration file is retained.',exact);continue;}
@@ -3666,19 +3663,22 @@ function reconcile(registrations){
  }
  for(const x of officerRoster.rows.filter(x=>isIncluded(x)&&/^Workshop Registered$/i.test(x.workshopRegistration))){
   if(registrations.some(r=>sameAppointment(r,x)&&r.location===x.location))continue;
+  const existing=registrations.find(r=>personKey(r.name)===personKey(x.name)&&r.location===x.location&&r.status==='Registered');
+  if(existing){add('Existing registration — additional appointment',x,x.name+' is already in the 23 November Bangkok file as '+existing.type+'. The roster confirms '+x.title+' as another appointment. This is not a missing or new event registration and is not counted twice.',[x]);continue;}
   add(x.location==='San Diego'?'San Diego registration from roster':'Bangkok registration newly reported',x,'Roster reports '+x.location+' registration. No matching record in the supplied 23 November Bangkok CSV. Added with roster provenance; registration date and workshop are not supplied.',[x]);
  }
  for(const x of officerRoster.rows.filter(x=>x.scope==='Chapter'&&core.includes(x.role))){
-  const ch=knownChapters.find(ch=>ch.name===x.chapter);const old=x.role==='MO'?ch.type!=='YPO Gold':x.role==='MEO'?(ch.type==='YPO Gold'||norm(ch.name)==='ypo uae integrated'):true;
-  if(!old&&!findings.some(f=>f.category==='Additional chapter role'&&f.chapter===x.chapter&&f.role===x.title))add('Additional chapter role',x,'An officer is appointed to this role in the roster. The role is now included in chapter coverage instead of the former chapter-type restriction.',[x]);
+  const ch=knownChapters.find(ch=>ch.name===x.chapter);
+  if(!applicable(ch,x.role)&&!findings.some(f=>f.category==='Optional non-core appointment'&&f.chapter===x.chapter&&f.role===x.title))add('Optional non-core appointment',x,'This is a valid appointed role. It is shown with non-core officers and is not part of the core-role coverage requirement.',[x]);
  }
+ for(const name of ['Tala Alsahsah','Jose Amorim']){if(findings.some(f=>personKey(f.name)===personKey(name)&&f.flagged))continue;const r=registrations.find(r=>personKey(r.name)===personKey(name))||officerRoster.rows.find(r=>personKey(r.name)===personKey(name));if(r)add('Flag retained for review',r,flagFor(name));}
  return findings;
 }
 function parseRosterRows(rows){
  if(!rows.length||!Object.hasOwn(rows[0],'Position Title')||!Object.hasOwn(rows[0],'Previously Trained'))throw Error('The officer roster requires Position Title and Previously Trained (Column K) headings.');
- return rows.map((r,i)=>({sourceRow:i+2,name:[r['First Name'],r['Last Name']].filter(Boolean).join(' ').trim(),chapter:r['Position Account Name']||r['Account Name  ↑']||r['Account Name']||'',parent:r['Position Parent Account']||'',title:r['Position Title']||'',appointmentStatus:r.Status||'',workshopRegistration:r['Workshop Registration']||'',event:r['Event Name']||'',previouslyTrained:r['Previously Trained']===true||['true','1'].includes(norm(r['Previously Trained']))})).filter(r=>r.title&&r.name);
+ return rows.map((r,i)=>({sourceRow:i+2,name:[r['First Name'],r['Last Name']].filter(Boolean).join(' ').trim(),chapter:r['Position Account Name']||r['Account Name  ↑']||r['Account Name']||'',parent:r['Position Parent Account']||'',title:r['Position Title']||'',appointmentStatus:r.Status||'',workshopRegistration:r['Workshop Registration']||'',event:r['Event Name']||'',previouslyTrained:r['Previously Trained']===true||['true','1'].includes(norm(r['Previously Trained']))})).filter(r=>r.title&&r.name&&!isRemoved(r.name));
 }
-return {roles,core,non,norm,personKey,roleOf,applicable,process,diff,csv,cell,cleanRow,refreshSnapshot,visibleStatus,isIncluded,reportRecords,reportingDiff,setRoster,getRoster,enrich,viewRecords,hasLocation,reconcile,sameAppointment,parseRosterRows};
+return {roles,core,non,norm,personKey,roleOf,applicable,process,diff,csv,cell,cleanRow,refreshSnapshot,visibleStatus,isIncluded,reportRecords,reportingDiff,setRoster,getRoster,enrich,viewRecords,hasLocation,reconcile,sameAppointment,parseRosterRows,isRemoved,optionalAppointment,flagFor,registrationCount,cleanRoster};
 })();
 
 Core.setRoster(SEED.roster, SEED.chapters);
@@ -3749,7 +3749,7 @@ const PdfReport = (() => {
     ctx.fillStyle = '#f0f4f9'; ctx.fillRect(M, 98, W - M * 2, 27);
     text(ctx, 'All ' + chapters.length + ' chapters', M + 9, 115, NAVY, 'bold 11px Arial');
     text(ctx, registered + '/' + total + ' core roles registered', M + 153, 115, NAVY, 'bold 11px Arial');
-    text(ctx, records.filter(r=>r.status==='Registered').length + ' current registrations', M + 391, 115, '#52677d', '10px Arial');
+    text(ctx, Core.registrationCount(records) + ' current registrations', M + 391, 115, '#52677d', '10px Arial');
     text(ctx, 'Location: ' + location, M + 571, 115, NAVY, 'bold 10px Arial');
     const colors = { Registered: ['#e6f3e9', '#216c3b'], Unregistered: ['#fbecef', '#a6374b'], 'Pending Verification': ['#ffffff', '#52677d'], 'Not Applicable': ['#ffffff', '#738096'], 'Previously trained': ['#eee7fa', '#644194'] };
     let legendX = M;
@@ -3764,9 +3764,9 @@ const PdfReport = (() => {
       const cells = Core.core.map((role, i) => {
         const cell = Core.cell(ch, role, records, loaded); ctx.font = '10px Arial';
         const officers = new Map();
-        for (const r of cell.records.filter(r=>r.status==='Registered'||r.previouslyTrained)) {
+        for (const r of cell.records.filter(r=>r.status==='Registered'&&Core.applicable(ch,role))) {
           const key = Core.norm(r.name) + '|' + r.status;
-          if (!officers.has(key)) officers.set(key, { name: r.name || 'Name not supplied', locations: new Set(), previouslyTrained:r.previouslyTrained, status:r.status });
+          if (!officers.has(key)) officers.set(key, { name: (r.name || 'Name not supplied')+(r.reviewFlag?' *':''), locations: new Set(), previouslyTrained:r.previouslyTrained, status:r.status });
           if(r.location) officers.get(key).locations.add(r.location === 'Bangkok' ? 'B' : r.location === 'San Diego' ? 'S' : r.location);
         }
         const lines = [...officers.values()].flatMap(r => wrap(ctx, r.name + (r.previouslyTrained?' [P]':'') + (showLocations && r.locations.size ? ' ' + [...r.locations].sort().join('/') : ''), widths[i + 1] - 12).map(value=>({text:value,status:r.status})));
@@ -3776,10 +3776,10 @@ const PdfReport = (() => {
       const applicable = Core.core.filter(role => Core.applicable(ch, role));
       return { ch, chapterLines, cells, height, coverage: `${applicable.filter(role => Core.cell(ch, role, records, loaded).status === 'Registered').length}/${applicable.length}` };
     });
-    const nonCoreRecords = records.filter(r => Core.non.includes(r.role) && r.scope === 'Chapter');
-    const nonCore = []; // Keep the all-chapter PDF to one portrait page; full non-core names are in the dashboard/CSV.
+    const nonCoreRecords = records.filter(r => r.scope === 'Chapter' && (Core.non.includes(r.role) || Core.optionalAppointment(r)));
+    const nonCore = nonCoreRecords.filter(r=>r.status==='Registered'); // Only registered officers' names are printed.
     ctx.font = '10px Arial';
-    const nonCorePlans = nonCore.map(r => wrap(ctx, `${r.chapter} | ${Core.roles[r.role]} | ${r.name || 'Name not supplied'} | ${r.location} | ${r.displaySession || 'Session not supplied'} | ${Core.visibleStatus(r.status)}`, W - M * 2 - 12));
+    const nonCorePlans = nonCore.map(r => wrap(ctx, `${r.chapter} | ${Core.roles[r.role]} | ${r.name || 'Name not supplied'} | ${r.location}`, W - M * 2 - 12));
     const bodyHeight = 28 + plans.reduce((sum, row) => sum + row.height, 0) + (nonCore.length ? 28 + nonCorePlans.reduce((sum, lines) => sum + lines.length * 12 + 7, 0) : 0);
     const tableTop = 154;
     const availableHeight = H - tableTop - 64;
@@ -3799,6 +3799,7 @@ const PdfReport = (() => {
         const [bg, color] = colors[cell.status]; ctx.fillStyle = bg; ctx.fillRect(x + 1, y + 1, widths[i + 1] - 2, row.height - 2);
         if (cell.lines.length) cell.lines.forEach((line, j) => text(ctx, line.text, x + 6, y + 15 + j * 12, line.status==='Registered'?colors.Registered[1]:colors['Previously trained'][1], '10px Arial'));
         else if (cell.status === 'Unregistered') text(ctx, '—', x + 6, y + 17, color, '10px Arial');
+        else if (cell.status === 'Previously trained') text(ctx, 'P', x + 6, y + 17, color, 'bold 10px Arial');
         x += widths[i + 1];
       });
       text(ctx, row.coverage, x + 7, y + 17, NAVY, 'bold 10px Arial');
@@ -3806,13 +3807,13 @@ const PdfReport = (() => {
       y += row.height;
     }
     if (nonCore.length) {
-      text(ctx, 'NON-CORE OFFICER REGISTRATIONS', 0, y + 20, NAVY, 'bold 10px Arial'); y += 28;
+      text(ctx, 'REGISTERED OPTIONAL / NON-CORE OFFICERS', 0, y + 20, NAVY, 'bold 10px Arial'); y += 28;
       for (const lines of nonCorePlans) { lines.forEach((line, i) => text(ctx, line, 6, y + 11 + i * 12, '#263d59', '10px Arial')); y += lines.length * 12 + 7; }
     }
     ctx.restore();
     const notesY = Math.min(H - 56, tableTop + bodyHeight * fit + 15);
     text(ctx, 'CC Chair | LO Learning | ALO Assistant Learning | FO Forum | MO Membership | MEO Member Engagement', M, notesY, '#64748b', '8px Arial');
-    if (!nonCore.length) text(ctx, 'Non-core: '+nonCoreRecords.filter(r=>r.status==='Registered').length+' registered, '+nonCoreRecords.filter(r=>r.status==='Previously trained').length+' previously trained. Full officer and regional details are in the dashboard.', M, notesY + 13, '#64748b', '8px Arial');
+    text(ctx, '* Tala and Jose remain flagged for review. Optional appointments do not increase the 135 core-role requirement.', M, notesY + 13, '#64748b', '8px Arial');
     ctx.strokeStyle = '#dce3ec'; ctx.beginPath(); ctx.moveTo(M, H - 34); ctx.lineTo(W - M, H - 34); ctx.stroke();
     text(ctx, loaded ? 'P marks prior-year training, not a 2027 registration. Regional and Network roles do not increase chapter coverage.' : 'Selected-location data is incomplete; missing registrations await verification. Registration does not establish attendance.', M, H - 19, '#64748b', '8px Arial');
     ctx.textAlign = 'right'; text(ctx, '1 / 1', W - M, H - 19, '#64748b', '8px Arial'); ctx.textAlign = 'left';
@@ -3867,13 +3868,13 @@ function OfficerRecord({ record: r }) {
     "Previously trained (Column K)": r.previouslyTrained ? "TRUE — trained last year" : "FALSE / no TRUE flag supplied", "Data source": r.source || "Registration file", "Roster rows": r.rosterRows?.join(", ") || "Not matched", "Registered at another location": r.registeredElsewhere || "", "Training location": r.location || "No current-location registration", "Training dates": DATES[r.location] || "Not supplied",
     "Workshop / session": r.displaySession || "Not supplied", "Registration date": r.date || "Not supplied",
     "Source time zone": "Eastern GMT−05:00, retained as supplied", "Source row": r.sourceRow,
-    "Verification notes": r.issues.join("; ") || r.confirmation || "No mapping issues identified"
+    "Review flag": r.reviewFlag || "", "Linked registration": r.linkedRegistrationId || "", "Officer classification": Core.optionalAppointment(r) ? "Optional non-core appointment" : r.scope === "Chapter" ? "Core / other chapter appointment" : r.scope, "Verification notes": r.issues.join("; ") || r.confirmation || "No mapping issues identified"
   };
   return <article className="record"><h3>{r.name || "Name not supplied"}</h3><StatusBadge status={r.status} /><dl className="detailgrid">{Object.entries(fields).map(([label, value]) => <React.Fragment key={label}><dt>{label}</dt><dd>{value}</dd></React.Fragment>)}</dl></article>;
 }
 
 export default function App() {
-  const [roster, setRoster] = useState(() => { try { const saved = JSON.parse(localStorage.getItem("ypo-mena-glc-2027-roster-v1") || "null"); return saved?.rows?.length && saved.date >= SEED.roster.date ? saved : SEED.roster; } catch { return SEED.roster; } });
+  const [roster, setRoster] = useState(() => { try { const saved = JSON.parse(localStorage.getItem("ypo-mena-glc-2027-roster-v1") || "null"); return Core.cleanRoster(saved?.rows?.length && saved.date >= SEED.roster.date ? saved : SEED.roster); } catch { return SEED.roster; } });
   Core.setRoster(roster, SEED.chapters);
   const TOTAL_APPLICABLE = SEED.chapters.reduce((sum, ch) => sum + Core.core.filter(role => Core.applicable(ch, role)).length, 0);
   const [rosterUpload, setRosterUpload] = useState({ date: todayDubai(), rows: [] });
@@ -3907,7 +3908,7 @@ export default function App() {
     const records = Core.reportRecords(sourceRecords).filter(r => filters.status !== "Previously trained" || r.previouslyTrained);
     let chapters = SEED.chapters.filter(ch => normalize(ch.name).includes(normalize(filters.chapter)) && (!filters.name || records.some(r => r.chapter === ch.name)));
     const roleKeys = (tab === 2 ? Core.non : Core.core).filter(role => filters.role === "All" || filters.role === role);
-    const getCell = (ch, role) => { const cell = Core.cell(ch, role, records, locationLoaded); if (Core.non.includes(role) && !cell.records.length) cell.status = "Pending Verification"; return cell; };
+    const getCell = (ch, role) => { const cell = Core.cell(ch, role, records, locationLoaded); if (Core.core.includes(role) && !Core.applicable(ch,role)) return { ...cell, records: [] }; if (Core.non.includes(role) && !cell.records.length) cell.status = "Pending Verification"; return cell; };
     const slots = chapters.flatMap(ch => roleKeys.map(role => ({ ch, role, ...getCell(ch, role) }))).filter(cell => filters.status === "All" || (filters.status === "Previously trained" ? cell.records.some(r => r.previouslyTrained) : cell.status === filters.status));
     if (filters.status !== "All") chapters = chapters.filter(ch => slots.some(cell => cell.ch.name === ch.name));
     const applicable = slots.filter(cell => Core.core.includes(cell.role) && Core.applicable(cell.ch, cell.role));
@@ -3918,14 +3919,14 @@ export default function App() {
   }, [selected, filters, tab, roster]);
   const sortedDetails = useMemo(() => [...model.details].sort((a, b) => tableSort.direction * (tableSort.key === "date" ? dateNumber(a.date) - dateNumber(b.date) : String(a[tableSort.key] || "").localeCompare(String(b[tableSort.key] || ""), undefined, { numeric: true }))), [model.details, tableSort]);
   const missingLocations = ["Bangkok", "San Diego"].filter(location => !Core.hasLocation(selected, location));
-  const flagged = model.details.filter(r => r.issues.length);
-  const rosterDiscrepancies = Core.reconcile(selected.flatMap(s => s.records)).filter(f => ["Officer differs from roster", "Officer not matched to roster", "Role or chapter differs", "Registration status differs"].includes(f.category));
+  const flagged = model.details.filter(r => r.reviewFlag || r.issues.length);
+  const rosterDiscrepancies = Core.reconcile(selected.flatMap(s => s.records)).filter(f => f.flagged || ["Officer differs from roster", "Officer not matched to roster", "Role or chapter differs", "Registration status differs"].includes(f.category));
   const changeFilter = (key, value) => setFilters(current => ({ ...current, [key]: value }));
   const openRecords = (records, title) => setModal({ kind: "records", title, records });
   const exportDetails = () => {
     const columns = ["Officer name", "Chapter", "Officer role", "Mapped role", "Scope", "Training location", "Training dates", "Workshop/session", "Registration date (Eastern GMT-05:00)", "Registration status", "Previously trained (Column K)", "Data source", "Roster rows", "Verification notes"];
     const safe = value => { let text = String(value ?? ""); if (/^[=+@\-\t\r]/.test(text)) text = "'" + text; return '"' + text.replace(/"/g, '""') + '"'; };
-    const rows = model.details.map(r => [r.name, r.chapter, r.confirmation && r.role ? Core.roles[r.role] : r.type, r.role, r.scope, r.location, DATES[r.location] || "Not supplied", r.displaySession, r.date, Core.visibleStatus(r.status), r.previouslyTrained ? "TRUE" : "FALSE", r.source, r.rosterRows?.join("; "), [r.exclusionReason, ...r.issues].filter(Boolean).join("; ")]);
+    const rows = model.details.map(r => [r.name, r.chapter, r.confirmation && r.role ? Core.roles[r.role] : r.type, r.role, r.scope, r.location, DATES[r.location] || "Not supplied", r.displaySession, r.date, Core.visibleStatus(r.status), r.previouslyTrained ? "TRUE" : "FALSE", r.source, r.rosterRows?.join("; "), [r.reviewFlag, r.exclusionReason, ...r.issues].filter(Boolean).join("; ")]);
     downloadFile("YPO-MENA-GLC-2027-registrations.csv", "\uFEFF" + [columns, ...rows].map(row => row.map(safe).join(",")).join("\r\n"), "text/csv;charset=utf-8");
     setMessage("Exported the registration records in the current filtered view.");
   };
@@ -3977,7 +3978,7 @@ export default function App() {
     try {
       const data = JSON.parse(await file.text());
       if (data.version !== 1 || !Array.isArray(data.snapshots) || !data.snapshots.length) throw Error("Unsupported backup format.");
-      if (data.roster?.rows?.length) setRoster(data.roster);
+      if (data.roster?.rows?.length) setRoster(Core.cleanRoster(data.roster));
       const restored = data.snapshots.map(s => {
         if (!s.id || !/^\d{4}-\d{2}-\d{2}$/.test(s.date) || !["Bangkok", "San Diego"].includes(s.location) || !Array.isArray(s.records) || !s.records.every(r => r.raw)) throw Error("Invalid snapshot in backup.");
         return { id: s.id, date: s.date, location: s.location, filename: s.filename || "Restored report", mode: s.mode || "complete", ...Core.process(s.records.map(r => r.raw), SEED.chapters, s.location), sourceRows: s.sourceRows ?? s.records.length, duplicates: s.duplicates ?? 0 };
@@ -4003,6 +4004,12 @@ export default function App() {
     setRoster({ ...rosterUpload }); setModal(null);
     setMessage("Officer roster updated. Prior-year training, role coverage and reconciliation refreshed. Registration snapshots retained.");
   }
+  function renderOptional() {
+    const all = model.records.filter(r => Core.optionalAppointment(r) && normalize(r.chapter).includes(normalize(filters.chapter)) && (filters.role === "All" || r.role === filters.role));
+    const registered = all.filter(r => r.status === "Registered" && (filters.status === "All" || filters.status === "Registered" || filters.status === "Previously trained" && r.previouslyTrained));
+    return <section style={{ marginTop: 24 }}><h2>Optional MEO / MO appointments</h2><p className="muted">MEO in YPO integrated chapters and MO in Gold chapters are valid non-core appointments. They do not add to the 135 core-role requirement. Registered officers are listed below; the full roster remains in officer details.</p><div className="tablewrap"><table><thead><tr><th>Registered officer</th><th>Chapter</th><th>Optional role</th><th>Location</th><th>Registration</th></tr></thead><tbody>{registered.map((r, i) => <tr key={`${r.id}-${i}`}><td><button className="link" onClick={() => openRecords([r], "Optional non-core appointment")}>{r.name}{r.reviewFlag ? " *" : ""}</button></td><td>{r.chapter}</td><td>{Core.roles[r.role]}</td><td>{r.location}</td><td><StatusBadge status={r.status} /></td></tr>)}</tbody></table>{!registered.length && <div className="empty">No matching registered optional officers.</div>}</div></section>;
+  }
+
   function renderRegional() {
     const records = model.details.filter(r => r.scope === "Regional" && Core.isIncluded(r));
     return <><div className="panelhead"><div><h2>MENA regional officers</h2><div className="muted">Regional appointments are shown separately and do not increase chapter-role coverage. Column K remains visible even when an officer is registered.</div></div><span className="pill">{records.filter(r => r.status === "Registered").length} registered / {records.length} appointments</span></div><div className="tablewrap"><table><thead><tr><th>Officer</th><th>Regional appointment</th><th>Registration status</th><th>Previously trained</th><th>Location / source</th></tr></thead><tbody>{records.map((r, i) => <tr key={`${r.id}-${i}`}><td><button className="link" onClick={() => openRecords([r], "Regional officer details")}>{r.name}</button></td><td>{r.type}</td><td><StatusBadge status={r.status} /></td><td>{r.previouslyTrained ? <StatusBadge status="Previously trained" /> : ""}</td><td>{r.location || "No current-location registration"}<div className="scope">{r.source}</div></td></tr>)}</tbody></table></div></>;
@@ -4025,7 +4032,7 @@ export default function App() {
         const coverage = model.coverage(ch);
         return <tr key={ch.name}><td className="chapter">{ch.name}<small className={ch.type === "YPO Gold" ? "gold" : ""}>{ch.type}</small></td>{keys.map(role => {
           const cell = model.getCell(ch, role); const visible = filters.status === "All" || cell.status === filters.status;
-          return <td key={role} className="center">{visible ? <button className="cellbtn" title={cell.records.map(r => `${r.name} · ${r.displaySession}`).join("\n") || Core.visibleStatus(cell.status)} onClick={() => openRecords(cell.records, `${ch.name} · ${Core.roles[role]}`)}><StatusBadge status={cell.status} />{cell.conflict && <span className="officer" style={{ color: "#996309" }}>⚠ Registration requires review</span>}{cell.records.map((record, i) => <span className="officer" key={`${record.id}-${i}`}>{record.name || "Name not supplied"}{record.status !== cell.status && <small> · {Core.visibleStatus(record.status)}</small>}{record.previouslyTrained && record.status === "Registered" && <small className="previous-text"> · prior-year training</small>}</span>)}</button> : <span className="muted">Filtered out</span>}</td>;
+          return <td key={role} className="center">{visible ? <button className="cellbtn" title={cell.records.map(r => `${r.name} · ${r.displaySession}`).join("\n") || Core.visibleStatus(cell.status)} onClick={() => openRecords(cell.records, `${ch.name} · ${Core.roles[role]}`)}><StatusBadge status={cell.status} />{cell.conflict && <span className="officer" style={{ color: "#996309" }}>⚠ Registration requires review</span>}{cell.records.filter(record => record.status === "Registered").map((record, i) => <span className="officer" key={`${record.id}-${i}`}>{record.name || "Name not supplied"}{record.reviewFlag && <small style={{ color: "#9a6715" }}> *</small>}{record.status !== cell.status && <small> · {Core.visibleStatus(record.status)}</small>}{record.previouslyTrained && record.status === "Registered" && <small className="previous-text"> · prior-year training</small>}</span>)}</button> : <span className="muted">Filtered out</span>}</td>;
         })}{!nonCore && <td className="coverage"><b>{coverage.registered}/{coverage.applicable}</b><div className="bar"><i style={{ width: `${coverage.applicable ? coverage.registered / coverage.applicable * 100 : 0}%` }} /></div></td>}</tr>;
       })}</tbody></table>{(!keys.length || !model.chapters.length) && <div className="empty">No matching chapters or roles. Adjust or reset filters.</div>}</div><div className="legend">{Object.keys(STATUS_CLASS).map(status => <StatusBadge key={status} status={status} />)}</div></>;
   }
@@ -4049,7 +4056,7 @@ export default function App() {
   const stats = [
     ["Chapters in view", model.chapters.length, "27 chapters in reference roster"],
     ["Registered role coverage", percentage(model.registered.length, model.applicable.length), `${model.registered.length} / ${model.applicable.length} applicable core role slots in filtered view`],
-    ["Matching registration records", Core.reportRecords(model.details).filter(r => r.status === "Registered").length, "2027 registrations; prior-year training is separate"],
+    ["Matching registration records", Core.registrationCount(model.details), "2027 registrations; prior-year training is separate"],
     ["Previously trained appointments", Core.reportRecords(model.details).filter(r => r.previouslyTrained).length, "Column K TRUE; includes currently registered officers"],
     ["Chapters fully registered", model.chapters.filter(ch => { const c = model.coverage(ch); return c.applicable > 0 && c.registered === c.applicable; }).length, "All selected applicable core roles registered"]
   ];
@@ -4063,10 +4070,10 @@ export default function App() {
       <div className="filters"><label>Chapter<input type="search" placeholder="Search chapters…" value={filters.chapter} onChange={e => changeFilter("chapter", e.target.value)} /></label><label>Officer name<input type="search" placeholder="Search officers…" value={filters.name} onChange={e => changeFilter("name", e.target.value)} /></label><label>Officer role<select value={filters.role} onChange={e => changeFilter("role", e.target.value)}><option value="All">All officer roles</option>{Object.entries(Core.roles).map(([key, value]) => <option key={key} value={key}>{key} · {value}</option>)}</select></label><label>Training location<select value={filters.location} onChange={e => changeFilter("location", e.target.value)}>{["All", "Bangkok", "San Diego"].map(value => <option key={value}>{value}</option>)}</select></label><label>Registration status<select value={filters.status} onChange={e => changeFilter("status", e.target.value)}>{["All", ...Object.keys(STATUS_CLASS)].map(value => <option key={value}>{value}</option>)}</select></label><label>Chapter order<select value={filters.sort} onChange={e => changeFilter("sort", e.target.value)}><option value="coverage-desc">Coverage: high to low</option><option value="coverage-asc">Coverage: low to high</option><option value="name">Chapter name</option></select></label><button className="btn" onClick={() => setFilters({ chapter: "", name: "", role: "All", location: "Bangkok", status: "All", sort: "coverage-desc" })}>Reset</button></div>
       <div style={{ maxWidth: 430 }}><label className="muted" htmlFor="ypo-report-view">Report / historical snapshot</label><select id="ypo-report-view" style={{ marginTop: 6 }} value={report} onChange={e => setReport(e.target.value)}><option value="current">Current combined report</option>{[...snapshots].reverse().map(s => <option key={s.id} value={s.id}>{s.location} · {s.date} · {s.filename}</option>)}</select></div>
       <nav className="tabs" role="tablist" aria-label="Dashboard views">{["Core role registrations", "Role breakdown", "Non-core officers", "Registration details", "Regional officers", "Roster check"].map((label, i) => <button key={label} role="tab" aria-selected={tab === i} className={`tab ${tab === i ? "active" : ""}`} onClick={() => setTab(i)}>0{i + 1} &nbsp; {label}</button>)}</nav>
-      <section className="panel" aria-live="polite">{tab === 0 ? renderMatrix() : tab === 1 ? renderRoles() : tab === 2 ? renderMatrix(true) : tab === 3 ? renderDetails() : tab === 4 ? renderRegional() : renderRosterCheck()}</section>
-      <details className="audit"><summary><b>Data quality & weekly changes</b> <span className="muted">· {flagged.length} flagged matching records</span></summary><p className="muted">Network Officer registrations, including Karin Troy, are excluded from reporting. Regional appointments do not establish a chapter appointment. Repeated session labels within a row are displayed once. Email and contact-address columns are excluded from saved and exported dashboard data.</p>{selected.map(s => { const prior = previousSnapshot(s, snapshots), delta = prior ? Core.reportingDiff(prior.records, s.records) : null; return <div className="notice" key={s.id}><b>{s.location} · {s.date}</b> — {s.filename}<br />{snapshotCoverage(s)}/{TOTAL_APPLICABLE} applicable core chapter roles registered ({percentage(snapshotCoverage(s), TOTAL_APPLICABLE)}).<br />{s.sourceRows} source rows → {Core.reportRecords(s.records).length} included records; {s.records.filter(r => !Core.isIncluded(r)).length} Network Officers excluded; {s.duplicates} exact duplicate rows suppressed.<br />{delta ? `Compared with ${prior.date}: ${delta.added.length} new, ${delta.changed.length} changed, ${delta.missing.length} absent from latest report. Coverage change: ${snapshotCoverage(s) - snapshotCoverage(prior)} role slots. Missing records are not assumed cancelled.` : "Initial baseline; no earlier snapshot for comparison."}</div>; })}
-        {flagged.map((r, i) => <div className="person" key={`${r.id}-${i}`}><button className="link" onClick={() => openRecords([r], "Verification details")}>{r.name}</button> · {r.chapter}<br />{r.issues.join("; ")}</div>)}
-        <p className="muted">Chapter roles now include confirmed roster appointments, adding 16 roles to the former chapter-type rules. Isabela Ududec remains registered MEO; Nuha Abujaber remains registered chapter MO and is also listed as Regional Forum Officer. Regional appointments do not increase chapter coverage.</p>
+      <section className="panel" aria-live="polite">{tab === 0 ? renderMatrix() : tab === 1 ? renderRoles() : tab === 2 ? <>{renderMatrix(true)}{renderOptional()}</> : tab === 3 ? renderDetails() : tab === 4 ? renderRegional() : renderRosterCheck()}</section>
+      <details className="audit"><summary><b>Data quality & weekly changes</b> <span className="muted">· {flagged.length} flagged matching records</span></summary><p className="muted">Network Officer registrations, including Karin Troy, are excluded from reporting. A manually excluded officer is omitted from report views. Regional appointments do not establish a chapter appointment. Repeated session labels within a row are displayed once. Email and contact-address columns are excluded from saved and exported dashboard data.</p>{selected.map(s => { const prior = previousSnapshot(s, snapshots), delta = prior ? Core.reportingDiff(prior.records, s.records) : null; return <div className="notice" key={s.id}><b>{s.location} · {s.date}</b> — {s.filename}<br />{snapshotCoverage(s)}/{TOTAL_APPLICABLE} applicable core chapter roles registered ({percentage(snapshotCoverage(s), TOTAL_APPLICABLE)}).<br />{s.sourceRows} source rows → {Core.reportRecords(s.records).length} included records; {s.records.filter(r => !Core.isIncluded(r)).length} Network Officers excluded; {s.duplicates} exact duplicate rows suppressed.<br />{delta ? `Compared with ${prior.date}: ${delta.added.length} new, ${delta.changed.length} changed, ${delta.missing.length} absent from latest report. Coverage change: ${snapshotCoverage(s) - snapshotCoverage(prior)} role slots. Missing records are not assumed cancelled.` : "Initial baseline; no earlier snapshot for comparison."}</div>; })}
+        {flagged.map((r, i) => <div className="person" key={`${r.id}-${i}`}><button className="link" onClick={() => openRecords([r], "Verification details")}>{r.name}</button> · {r.chapter}<br />{r.reviewFlag || r.issues.join("; ")}</div>)}
+        <p className="muted">The core requirement is 135 roles: CC, LO, ALO and FO for every chapter, MO for YPO chapters, and MEO for Gold chapters. Other MEO/MO appointments are valid non-core roles. Isabela remains registered non-core MEO. Nuha is already registered in the 23 November file as Dual Role Officer; her chapter MO and regional FO appointments share that event registration. Tala and Jose remain flagged for review.</p>
       </details>
     </main><footer>YPO MENA · GLC 2027 Registration Dashboard<br />Registration does not establish training attendance. History is saved in this browser; export a backup after each weekly update.</footer>
     <dialog ref={dialogRef} onCancel={() => setModal(null)} onClose={() => setModal(null)}><button className="close" aria-label="Close" onClick={() => setModal(null)}>×</button><h2>{modal?.title}</h2>
